@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mosquitto
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.mosquitto.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "teslamate.mosquitto.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "teslamate.mosquitto.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: mosquitto
+          image: "{{ .Values.mosquitto.image.registry }}{{ .Values.mosquitto.image.repository }}:{{ .Values.mosquitto.image.tag }}"
+          imagePullPolicy: {{ .Values.mosquitto.image.pullPolicy }}
+          command:
+            - mosquitto
+            - -c
+            - /mosquitto-no-auth.conf
+          ports:
+            - containerPort: 1883
+              name: mqtt
+          volumeMounts:
+            - name: mosquitto-data
+              mountPath: /mosquitto/data
+          resources:
+            {{- toYaml .Values.mosquitto.resources | nindent 12 }}
+      volumes:
+        - name: mosquitto-data
+          {{- if .Values.mosquitto.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.mosquitto.persistence.existingClaim | quote }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: mosquitto-pvc
+          {{- end }}
+---
+{{- if not .Values.mosquitto.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mosquitto-pvc
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.mosquitto.selectorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.mosquitto.persistence.size | quote }}
+  {{- if .Values.mosquitto.persistence.storageClass }}
+  storageClassName: {{ .Values.mosquitto.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

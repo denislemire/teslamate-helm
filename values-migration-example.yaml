@@ -1,0 +1,28 @@
+# Example values for migrating from existing K8s/Docker to this chart.
+# Copy to e.g. my-migration.yaml and set existingClaim/existingSecret to match your cluster.
+# Set virtualHost and domain via --set to avoid committing them:
+#   --set teslamate.config.virtualHost=your-fqdn.example.com \
+#   --set grafana.config.domain=your-fqdn.example.com \
+#   --set teslamate.config.timezone=America/Your_Timezone
+
+database:
+  existingSecret: "your-db-secret-name"
+  persistence:
+    existingClaim: ""  # e.g. db-storage-teslamate-db-0 if reusing existing PVC
+
+teslamate:
+  existingSecret: "your-teslamate-secret-name"
+
+grafana:
+  existingSecret: "your-grafana-secret-name"
+  persistence:
+    existingClaim: ""  # e.g. teslamate-grafana-data
+
+mosquitto:
+  persistence:
+    existingClaim: ""  # e.g. mosquitto-pvc
+
+# Optional: enable TeslaMate API
+teslamateApi:
+  enabled: false
+  existingSecret: ""

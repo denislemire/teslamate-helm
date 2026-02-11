@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: teslamate-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.app.selectorLabels" . | nindent 4 }}
+data:
+  FQDN_TM: {{ .Values.teslamate.config.virtualHost | quote }}
+  TM_TZ: {{ .Values.teslamate.config.timezone | quote }}

@@ -1,0 +1,13 @@
+1. Get the application URL and Grafana URL (replace with your ingress or port-forward):
+
+   TeslaMate:  http://{{ .Values.teslamate.config.virtualHost }}:4000
+   Grafana:    http://{{ .Values.grafana.config.domain }}:3000
+
+2. Ensure you have created the required Kubernetes secret(s) and set existingSecret in values.
+   Required keys are documented in the README.
+
+3. For TeslaMate: open the web UI, sign in with your Tesla account.
+   For Grafana: default login is admin / (password from your secret).
+
+4. To backup the database before upgrades:
+   kubectl exec -n {{ .Release.Namespace }} <db-pod> -- pg_dump -U <user> <dbname> > backup.sql

@@ -1,0 +1,5 @@
+# Local values and backups - do not commit
+*-backup*.sql
+my-values.yaml
+values-local.yaml
+MIGRATION-REPORT.md

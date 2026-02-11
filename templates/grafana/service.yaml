@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: teslamate-grafana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.grafana.selectorLabels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "teslamate.grafana.selectorLabels" . | nindent 4 }}

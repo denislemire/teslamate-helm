@@ -1,0 +1,52 @@
+{{- if .Values.database.persistence.existingClaim }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teslamate-db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.database.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "teslamate.database.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "teslamate.database.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: teslamate-db
+          image: "{{ .Values.database.image.registry }}{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+          imagePullPolicy: {{ .Values.database.image.pullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.existingSecretUserKey | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.existingSecretPasswordKey | quote }}
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.existingSecret | quote }}
+                  key: {{ .Values.database.existingSecretDatabaseKey | quote }}
+          ports:
+            - containerPort: 5432
+              name: postgres
+          volumeMounts:
+            - name: db-storage
+              mountPath: /var/lib/postgresql/data
+              subPath: data
+          resources:
+            {{- toYaml .Values.database.resources | nindent 12 }}
+      volumes:
+        - name: db-storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.database.persistence.existingClaim | quote }}
+{{- end }}

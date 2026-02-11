@@ -1,0 +1,48 @@
+{{- if .Values.teslamateApi.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: teslamateapi-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.api.selectorLabels" . | nindent 4 }}
+data:
+  DATABASE_HOST: {{ default (include "teslamate.databaseHost" .) .Values.teslamateApi.config.databaseHost | quote }}
+  DATABASE_PORT: {{ .Values.teslamateApi.config.databasePort | quote }}
+  DATABASE_NAME: {{ .Values.teslamateApi.config.databaseName | quote }}
+  DATABASE_USER: {{ .Values.teslamateApi.config.databaseUser | quote }}
+  DATABASE_SSL: {{ .Values.teslamateApi.config.databaseSsl | quote }}
+  DATABASE_TIMEOUT: {{ .Values.teslamateApi.config.databaseTimeout | quote }}
+  MQTT_HOST: {{ default (include "teslamate.mosquittoHost" .) .Values.teslamateApi.config.mqttHost | quote }}
+  MQTT_PORT: {{ .Values.teslamateApi.config.mqttPort | quote }}
+  MQTT_TLS: {{ .Values.teslamateApi.config.mqttTls | quote }}
+  MQTT_CLIENTID: {{ .Values.teslamateApi.config.mqttClientId | quote }}
+  MQTT_NAMESPACE: {{ .Values.teslamateApi.config.mqttNamespace | quote }}
+  TESLAMATE_HOST: {{ default (include "teslamate.teslamateHost" .) .Values.teslamateApi.config.teslamateHost | quote }}
+  TESLAMATE_PORT: {{ .Values.teslamateApi.config.teslamatePort | quote }}
+  TESLAMATE_SSL: {{ .Values.teslamateApi.config.teslamateSsl | quote }}
+  API_TOKEN_DISABLE: {{ .Values.teslamateApi.config.apiTokenDisable | quote }}
+  ENABLE_COMMANDS: {{ .Values.teslamateApi.config.enableCommands | quote }}
+  COMMANDS_ALL: {{ .Values.teslamateApi.config.commandsAll | quote }}
+  COMMANDS_ALLOWLIST: {{ .Values.teslamateApi.config.commandsAllowlist | quote }}
+  DEBUG_MODE: {{ .Values.teslamateApi.config.debugMode | quote }}
+  DISABLE_MQTT: {{ .Values.teslamateApi.config.disableMqtt | quote }}
+  COMMANDS_ALERT: {{ .Values.teslamateApi.config.commandsAlert | quote }}
+  COMMANDS_CHARGING: {{ .Values.teslamateApi.config.commandsCharging | quote }}
+  COMMANDS_CLIMATE: {{ .Values.teslamateApi.config.commandsClimate | quote }}
+  COMMANDS_DOORS: {{ .Values.teslamateApi.config.commandsDoors | quote }}
+  COMMANDS_HOMELINK: {{ .Values.teslamateApi.config.commandsHomelink | quote }}
+  COMMANDS_LOGGING: {{ .Values.teslamateApi.config.commandsLogging | quote }}
+  COMMANDS_MEDIA: {{ .Values.teslamateApi.config.commandsMedia | quote }}
+  COMMANDS_REMOTESTART: {{ .Values.teslamateApi.config.commandsRemotestart | quote }}
+  COMMANDS_SENTRYMODE: {{ .Values.teslamateApi.config.commandsSentrymode | quote }}
+  COMMANDS_SHARING: {{ .Values.teslamateApi.config.commandsSharing | quote }}
+  COMMANDS_SOFTWAREUPDATE: {{ .Values.teslamateApi.config.commandsSoftwareupdate | quote }}
+  COMMANDS_SPEEDLIMIT: {{ .Values.teslamateApi.config.commandsSpeedlimit | quote }}
+  COMMANDS_SUNROOF: {{ .Values.teslamateApi.config.commandsSunroof | quote }}
+  COMMANDS_TRUNK: {{ .Values.teslamateApi.config.commandsTrunk | quote }}
+  COMMANDS_UNKNOWN: {{ .Values.teslamateApi.config.commandsUnknown | quote }}
+  COMMANDS_VALET: {{ .Values.teslamateApi.config.commandsValet | quote }}
+  COMMANDS_WAKE: {{ .Values.teslamateApi.config.commandsWake | quote }}
+  COMMANDS_WINDOWS: {{ .Values.teslamateApi.config.commandsWindows | quote }}
+{{- end }}

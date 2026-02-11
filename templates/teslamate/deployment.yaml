@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teslamate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.app.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "teslamate.app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "teslamate.app.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: teslamate
+          image: "{{ .Values.teslamate.image.registry }}{{ .Values.teslamate.image.repository }}:{{ .Values.teslamate.image.tag }}"
+          imagePullPolicy: {{ .Values.teslamate.image.pullPolicy }}
+          env:
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.teslamate.existingSecret | quote }}
+                  key: {{ .Values.teslamate.existingSecretEncryptionKey | quote }}
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.teslamate.existingSecret | quote }}
+                  key: {{ .Values.teslamate.existingSecretUserKey | quote }}
+            - name: DATABASE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.teslamate.existingSecret | quote }}
+                  key: {{ .Values.teslamate.existingSecretPasswordKey | quote }}
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.teslamate.existingSecret | quote }}
+                  key: {{ .Values.teslamate.existingSecretDatabaseKey | quote }}
+            - name: DATABASE_HOST
+              value: {{ include "teslamate.databaseHost" . | quote }}
+            - name: MQTT_HOST
+              value: {{ include "teslamate.mosquittoHost" . | quote }}
+            - name: CHECK_ORIGIN
+              value: "true"
+            - name: VIRTUAL_HOST
+              value: {{ .Values.teslamate.config.virtualHost | quote }}
+            - name: TZ
+              valueFrom:
+                configMapKeyRef:
+                  name: teslamate-config
+                  key: TM_TZ
+          ports:
+            - containerPort: 4000
+              name: http
+          volumeMounts:
+            - name: import-storage
+              mountPath: /opt/app/import
+          resources:
+            {{- toYaml .Values.teslamate.resources | nindent 12 }}
+      volumes:
+        - name: import-storage
+          {{- if .Values.teslamate.import.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.teslamate.import.existingClaim | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}

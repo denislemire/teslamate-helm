@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: teslamate-grafana
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.grafana.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "teslamate.grafana.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "teslamate.grafana.selectorLabels" . | nindent 8 }}
+    spec:
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command:
+            - sh
+            - -c
+            - chown -R 472:472 /var/lib/grafana
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+      containers:
+        - name: grafana
+          image: "{{ .Values.grafana.image.registry }}{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+          imagePullPolicy: {{ .Values.grafana.image.pullPolicy }}
+          env:
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretUserKey | quote }}
+            - name: DATABASE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretPasswordKey | quote }}
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretDatabaseKey | quote }}
+            - name: DATABASE_HOST
+              value: {{ include "teslamate.databaseHost" . | quote }}
+            - name: GRAFANA_PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretGrafanaPasswordKey | quote }}
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretGrafanaUserKey | quote }}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.grafana.existingSecret | quote }}
+                  key: {{ .Values.grafana.existingSecretGrafanaPasswordKey | quote }}
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+            - name: GF_SERVER_DOMAIN
+              value: {{ .Values.grafana.config.domain | quote }}
+            - name: GF_SERVER_ROOT_URL
+              value: {{ .Values.grafana.config.rootUrl | quote }}
+            - name: GF_SERVER_SERVE_FROM_SUB_PATH
+              value: {{ .Values.grafana.config.serveFromSubPath | quote }}
+          ports:
+            - containerPort: 3000
+              name: http
+          volumeMounts:
+            - name: grafana-storage
+              mountPath: /var/lib/grafana
+          resources:
+            {{- toYaml .Values.grafana.resources | nindent 12 }}
+      volumes:
+        - name: grafana-storage
+          {{- if .Values.grafana.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.grafana.persistence.existingClaim | quote }}
+          {{- else }}
+          persistentVolumeClaim:
+            claimName: teslamate-grafana-data
+          {{- end }}
+---
+# PVC for Grafana only when not using existingClaim
+{{- if not .Values.grafana.persistence.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: teslamate-grafana-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.grafana.selectorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.grafana.persistence.size | quote }}
+  {{- if .Values.grafana.persistence.storageClass }}
+  storageClassName: {{ .Values.grafana.persistence.storageClass | quote }}
+  {{- end }}
+{{- end }}

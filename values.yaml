@@ -1,0 +1,167 @@
+# Default values for teslamate.
+# See README and docs.teslamate.org for configuration.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Database (Postgres). Required by TeslaMate and Grafana.
+database:
+  image:
+    registry: ""
+    repository: postgres
+    tag: "17"
+    pullPolicy: IfNotPresent
+  # When set, use a Deployment with this PVC (keeps existing data when migrating).
+  # When empty, use StatefulSet with new PVC from volumeClaimTemplate.
+  persistence:
+    existingClaim: ""
+    size: 10Gi
+    storageClass: ""
+  # Use existing secret for DB credentials. Postgres expects env POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
+  # Default key names below match a shared TeslaMate secret (TM_DB_*). Override if your secret uses different keys.
+  existingSecret: ""
+  existingSecretUserKey: "TM_DB_USER"
+  existingSecretPasswordKey: "TM_DB_PASS"
+  existingSecretDatabaseKey: "TM_DB_NAME"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# -- TeslaMate application
+teslamate:
+  image:
+    registry: ""
+    repository: teslamate/teslamate
+    tag: "2.2.0"
+    pullPolicy: IfNotPresent
+  existingSecret: ""  # Must contain ENCRYPTION_KEY, DATABASE_USER, DATABASE_PASS, DATABASE_NAME (or keys set below)
+  existingSecretEncryptionKey: "ENCRYPTION_KEY"
+  existingSecretUserKey: "TM_DB_USER"      # or DATABASE_USER
+  existingSecretPasswordKey: "TM_DB_PASS"
+  existingSecretDatabaseKey: "TM_DB_NAME"
+  config:
+    # Public host for URLs (e.g. teslamate.example.com). Used for VIRTUAL_HOST and Grafana.
+    virtualHost: "localhost"
+    timezone: "UTC"
+  # Import volume for TeslaFi etc. Set existingClaim or leave empty for emptyDir.
+  import:
+    existingClaim: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+# -- Grafana (TeslaMate dashboards)
+grafana:
+  image:
+    registry: ""
+    repository: teslamate/grafana
+    tag: "2.2.0"
+    pullPolicy: IfNotPresent
+  existingSecret: ""  # DATABASE_USER, DATABASE_PASS, DATABASE_NAME, GF_SECURITY_ADMIN_USER, GF_SECURITY_ADMIN_PASSWORD (or GRAFANA_USER, GRAFANA_PW)
+  existingSecretUserKey: "TM_DB_USER"
+  existingSecretPasswordKey: "TM_DB_PASS"
+  existingSecretDatabaseKey: "TM_DB_NAME"
+  existingSecretGrafanaUserKey: "GRAFANA_USER"
+  existingSecretGrafanaPasswordKey: "GRAFANA_PW"
+  persistence:
+    existingClaim: ""
+    size: 5Gi
+    storageClass: ""
+  config:
+    domain: "localhost"  # GF_SERVER_DOMAIN; usually same as teslamate.config.virtualHost
+    rootUrl: "%(protocol)s://%(domain)s/grafana"
+    serveFromSubPath: true
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# -- MQTT broker (Mosquitto)
+mosquitto:
+  image:
+    registry: ""
+    repository: eclipse-mosquitto
+    tag: "2"
+    pullPolicy: IfNotPresent
+  # No auth by default (per TeslaMate docs). Data volume for persistence.
+  persistence:
+    existingClaim: ""
+    size: 1Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -- Optional TeslaMate API (REST API for TeslaMate data)
+teslamateApi:
+  enabled: false
+  image:
+    registry: ""
+    repository: tobiasehlert/teslamateapi
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  existingSecret: ""  # Must contain DATABASE_PASS (and optionally API tokens)
+  config:
+    # These are derived from release namespace when left empty
+    databaseHost: ""
+    databasePort: "5432"
+    databaseName: "teslamate"
+    databaseUser: "teslamate"
+    databaseSsl: "disable"
+    databaseTimeout: "60000"
+    mqttHost: ""
+    mqttPort: "1883"
+    mqttTls: "false"
+    mqttClientId: ""
+    mqttNamespace: ""
+    teslamateHost: ""
+    teslamatePort: "4000"
+    teslamateSsl: "false"
+    # Feature flags (TeslaMate API)
+    apiTokenDisable: "false"
+    enableCommands: "false"
+    commandsAll: "false"
+    commandsAllowlist: "allow_list.json"
+    debugMode: "false"
+    disableMqtt: "false"
+    # Command toggles - set to "true" to enable
+    commandsAlert: "false"
+    commandsCharging: "false"
+    commandsClimate: "false"
+    commandsDoors: "false"
+    commandsHomelink: "false"
+    commandsLogging: "false"
+    commandsMedia: "false"
+    commandsRemotestart: "false"
+    commandsSentrymode: "false"
+    commandsSharing: "false"
+    commandsSoftwareupdate: "false"
+    commandsSpeedlimit: "false"
+    commandsSunroof: "false"
+    commandsTrunk: "false"
+    commandsUnknown: "false"
+    commandsValet: "false"
+    commandsWake: "false"
+    commandsWindows: "false"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
