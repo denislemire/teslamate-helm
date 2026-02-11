@@ -1,5 +1,8 @@
 # Local values and backups - do not commit
 *-backup*.sql
+*-backup*.sql.gz
+backup-parts/
 my-values.yaml
 values-local.yaml
 MIGRATION-REPORT.md
+INCIDENT-REPORT*.md

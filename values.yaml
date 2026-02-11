@@ -15,6 +15,8 @@ database:
   # When empty, use StatefulSet with new PVC from volumeClaimTemplate.
   persistence:
     existingClaim: ""
+    # Name for the volumeClaimTemplate (PVCs will be named <name>-teslamate-db-0, ...). Change to create a new PVC (e.g. when migrating from Deployment to StatefulSet).
+    volumeClaimTemplateName: "db-storage"
     size: 10Gi
     storageClass: ""
   # Use existing secret for DB credentials. Postgres expects env POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.

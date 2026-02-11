@@ -53,10 +53,7 @@ All components support `resources.requests` and `resources.limits`. Defaults are
 
 If you are moving from Docker Compose or hand-written Kubernetes manifests:
 
-1. **Backup the database** (required if you will use a new PVC for Postgres):
-   ```bash
-   kubectl exec -n <namespace> <db-pod> -- pg_dump -U <user> <dbname> > backup.sql
-   ```
+1. **Backup the database** (required if you will use a new PVC for Postgres). For small DBs you can stream: `kubectl exec -n <namespace> <db-pod> -- pg_dump -U <user> <dbname> > backup.sql`. For large DBs this can truncate; use the [truncation-safe method in docs/](docs/README.md#backup-from-an-existing-pvc-no-stream-truncation) instead.
 
 2. **Optional:** Snapshot your PVCs (e.g. via your storage driver) for rollback.
 

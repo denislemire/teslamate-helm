@@ -1,0 +1,39 @@
+# One-off pod to run Postgres from an existing PVC and run pg_dump to a file inside the pod.
+# Use this when you need a full backup without stream truncation (e.g. large DB; kubectl exec ... pg_dump ... > file can truncate).
+# Steps: 1) Edit namespace and claimName below. 2) kubectl apply -f this file.
+# 3) kubectl exec -n <ns> teslamate-backup-from-old-pvc -- pg_dump -U <user> <dbname> -f /tmp/backup.sql
+# 4) Copy file out (e.g. in chunks: split in pod, kubectl cp each part, reassemble locally). 5) kubectl delete pod ...
+apiVersion: v1
+kind: Pod
+metadata:
+  name: teslamate-backup-from-old-pvc
+  namespace: teslamate
+spec:
+  restartPolicy: Never
+  containers:
+    - name: postgres
+      image: postgres:17
+      env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: teslamate-secret
+              key: TM_DB_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: teslamate-secret
+              key: TM_DB_PASS
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: teslamate-secret
+              key: TM_DB_NAME
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+          subPath: data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: db-storage-teslamate-db-0  # set to your existing DB PVC name
