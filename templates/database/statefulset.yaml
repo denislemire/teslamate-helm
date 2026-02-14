@@ -41,7 +41,7 @@ spec:
             - containerPort: 5432
               name: postgres
           volumeMounts:
-            - name: db-storage
+            - name: {{ .Values.database.persistence.volumeClaimTemplateName | default "db-storage" }}
               mountPath: /var/lib/postgresql/data
               subPath: data
           resources:
@@ -49,7 +49,7 @@ spec:
       volumes: []
   volumeClaimTemplates:
     - metadata:
-        name: db-storage
+        name: {{ .Values.database.persistence.volumeClaimTemplateName | default "db-storage" }}
       spec:
         accessModes:
           - ReadWriteOnce
