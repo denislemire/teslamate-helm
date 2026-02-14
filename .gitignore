@@ -2,4 +2,5 @@
 *-backup*.sql
 my-values.yaml
 values-local.yaml
+values-teslamate.yaml
 MIGRATION-REPORT.md
