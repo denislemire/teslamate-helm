@@ -2,7 +2,7 @@ apiVersion: v2
 name: teslamate
 description: A Helm chart for TeslaMate - self-hosted data logger for Tesla vehicles
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "2.2.0"
 keywords:
   - teslamate

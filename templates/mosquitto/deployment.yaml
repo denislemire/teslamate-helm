@@ -22,13 +22,16 @@ spec:
           command:
             - mosquitto
             - -c
-            - /mosquitto-no-auth.conf
+            - /etc/mosquitto/mosquitto.conf
           ports:
             - containerPort: 1883
               name: mqtt
           volumeMounts:
             - name: mosquitto-data
               mountPath: /mosquitto/data
+            - name: mosquitto-config
+              mountPath: /etc/mosquitto
+              readOnly: true
           resources:
             {{- toYaml .Values.mosquitto.resources | nindent 12 }}
       volumes:
@@ -40,6 +43,9 @@ spec:
           persistentVolumeClaim:
             claimName: mosquitto-pvc
           {{- end }}
+        - name: mosquitto-config
+          configMap:
+            name: mosquitto-config
 ---
 {{- if not .Values.mosquitto.persistence.existingClaim }}
 apiVersion: v1

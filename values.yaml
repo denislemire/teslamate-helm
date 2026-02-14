@@ -94,7 +94,7 @@ mosquitto:
   image:
     registry: ""
     repository: eclipse-mosquitto
-    tag: "2"
+    tag: "2"  # 2.x; explicit listener + allow_anonymous in ConfigMap
     pullPolicy: IfNotPresent
   # No auth by default (per TeslaMate docs). Data volume for persistence.
   persistence:

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mosquitto-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "teslamate.mosquitto.labels" . | nindent 4 }}
+data:
+  mosquitto.conf: |
+    # Mosquitto 2.x: explicit listener and allow_anonymous required.
+    # TeslaMate, TeslaMate API, and MQTT clients (e.g. Home Assistant) connect without auth.
+    listener 1883
+    allow_anonymous true
