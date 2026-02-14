@@ -17,6 +17,8 @@ database:
     existingClaim: ""
     size: 10Gi
     storageClass: ""
+    # Name for volumeClaimTemplate. Must match existing StatefulSet if migrating; cannot be changed after creation.
+    volumeClaimTemplateName: "db-storage"
   # Use existing secret for DB credentials. Postgres expects env POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB.
   # Default key names below match a shared TeslaMate secret (TM_DB_*). Override if your secret uses different keys.
   existingSecret: ""
