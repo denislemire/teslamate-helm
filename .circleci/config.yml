@@ -1,0 +1,55 @@
+# Publish TeslaMate Helm chart to an OCI registry.
+# Triggers: tag push matching v* (e.g. v0.1.1).
+# Manual: Trigger pipeline with parameter run-publish=true.
+#
+# Required context/env vars (set in CircleCI project or context):
+#   OCI_REGISTRY    - Registry host (e.g. registry.example.com)
+#   OCI_REGISTRY_USER - Registry username (default: admin)
+#   OCI_REGISTRY_PASSWORD - Registry password
+version: 2.1
+parameters:
+  run-publish:
+    type: boolean
+    default: false
+jobs:
+  publish-oci:
+    docker:
+      - image: alpine:3.19
+    steps:
+      - checkout
+      - run:
+          name: Install Helm and package chart
+          command: |
+            set -e
+            apk add --no-cache curl
+            HELM_VER="3.18.3"
+            curl -sSL "https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz" | tar xz -C /tmp linux-amd64/helm --strip-components=1
+            mv /tmp/helm /usr/local/bin/
+            helm package .
+            CHART_TGZ=$(ls -1 teslamate-*.tgz 2>/dev/null | head -1)
+            [ -n "$CHART_TGZ" ] || { echo "Chart package failed"; exit 1; }
+            echo "$CHART_TGZ" > /tmp/chart_name
+      - run:
+          name: Push to OCI registry
+          command: |
+            set -e
+            CHART_TGZ=$(cat /tmp/chart_name)
+            REGISTRY_USER="${OCI_REGISTRY_USER:-admin}"
+            [ -n "$OCI_REGISTRY" ] || { echo "OCI_REGISTRY not set"; exit 1; }
+            [ -n "$OCI_REGISTRY_PASSWORD" ] || { echo "OCI_REGISTRY_PASSWORD not set"; exit 1; }
+            echo "$OCI_REGISTRY_PASSWORD" | helm registry login "$OCI_REGISTRY" -u "$REGISTRY_USER" --password-stdin
+            helm push "$CHART_TGZ" "oci://${OCI_REGISTRY}/teslamate"
+            echo "Pushed $CHART_TGZ to OCI registry"
+
+workflows:
+  version: 2
+  publish-on-tag:
+    jobs:
+      - publish-oci:
+          filters:
+            tags:
+              only: /^v.*/
+  publish-manual:
+    when: { equal: [ true, << pipeline.parameters.run-publish >> ] }
+    jobs:
+      - publish-oci

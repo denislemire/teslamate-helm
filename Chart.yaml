@@ -15,3 +15,6 @@ sources:
   - https://github.com/teslamate-org/teslamate
 maintainers: []
 license: MIT
+annotations:
+  org.opencontainers.image.source: "https://github.com/denislemire/teslamate-helm"
+  org.opencontainers.image.description: "A Helm chart for TeslaMate - self-hosted data logger for Tesla vehicles"
