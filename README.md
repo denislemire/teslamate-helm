@@ -76,4 +76,4 @@ If you are moving from Docker Compose or hand-written Kubernetes manifests:
 
 ## License
 
-MIT. TeslaMate and TeslaMate API are also MIT-licensed.
+This chart is MIT-licensed. The TeslaMate application is licensed under [AGPLv3](https://www.gnu.org/licenses/agpl-3.0.html). TeslaMate API is MIT-licensed.
