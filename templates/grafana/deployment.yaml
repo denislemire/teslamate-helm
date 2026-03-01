@@ -72,6 +72,8 @@ spec:
               value: {{ .Values.grafana.config.rootUrl | quote }}
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: {{ .Values.grafana.config.serveFromSubPath | quote }}
+            - name: GF_UPDATE_CHECK_ENABLED
+              value: "false"
           ports:
             - containerPort: 3000
               name: http

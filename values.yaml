@@ -38,7 +38,7 @@ teslamate:
   image:
     registry: ""
     repository: teslamate/teslamate
-    tag: "2.2.0"
+    tag: "3.0.0"
     pullPolicy: IfNotPresent
   existingSecret: ""  # Must contain ENCRYPTION_KEY, DATABASE_USER, DATABASE_PASS, DATABASE_NAME (or keys set below)
   existingSecretEncryptionKey: "ENCRYPTION_KEY"
@@ -65,7 +65,7 @@ grafana:
   image:
     registry: ""
     repository: teslamate/grafana
-    tag: "2.2.0"
+    tag: "3.0.0"
     pullPolicy: IfNotPresent
   existingSecret: ""  # DATABASE_USER, DATABASE_PASS, DATABASE_NAME, GF_SECURITY_ADMIN_USER, GF_SECURITY_ADMIN_PASSWORD (or GRAFANA_USER, GRAFANA_PW)
   existingSecretUserKey: "TM_DB_USER"
