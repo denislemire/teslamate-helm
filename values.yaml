@@ -110,6 +110,7 @@ mosquitto:
       memory: 512Mi
 
 # -- Optional TeslaMate API (REST API for TeslaMate data)
+# When enabled, ENCRYPTION_KEY and DATABASE_PASS are read from teslamate.existingSecret unless teslamateApi.existingSecret is set.
 teslamateApi:
   enabled: false
   image:
@@ -117,7 +118,9 @@ teslamateApi:
     repository: tobiasehlert/teslamateapi
     tag: "latest"
     pullPolicy: IfNotPresent
-  existingSecret: ""  # Must contain DATABASE_PASS (and optionally API tokens)
+  existingSecret: ""
+  existingSecretEncryptionKey: ""
+  existingSecretPasswordKey: ""
   config:
     # These are derived from release namespace when left empty
     databaseHost: ""

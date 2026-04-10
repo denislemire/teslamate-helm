@@ -1,4 +1,10 @@
 {{- if .Values.teslamateApi.enabled }}
+{{- $secretName := default .Values.teslamate.existingSecret .Values.teslamateApi.existingSecret }}
+{{- if not $secretName }}
+{{- fail "teslamateApi.enabled requires teslamate.existingSecret or teslamateApi.existingSecret (for ENCRYPTION_KEY and DATABASE_PASS)" }}
+{{- end }}
+{{- $encKey := default .Values.teslamate.existingSecretEncryptionKey .Values.teslamateApi.existingSecretEncryptionKey }}
+{{- $passKey := default .Values.teslamate.existingSecretPasswordKey .Values.teslamateApi.existingSecretPasswordKey }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,8 +29,17 @@ spec:
           envFrom:
             - configMapRef:
                 name: teslamateapi-config
-            - secretRef:
-                name: {{ .Values.teslamateApi.existingSecret | quote }}
+          env:
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName | quote }}
+                  key: {{ $encKey | quote }}
+            - name: DATABASE_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName | quote }}
+                  key: {{ $passKey | quote }}
           ports:
             - containerPort: 8080
               name: http

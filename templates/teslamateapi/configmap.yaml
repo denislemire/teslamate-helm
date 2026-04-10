@@ -7,6 +7,7 @@ metadata:
   labels:
     {{- include "teslamate.api.selectorLabels" . | nindent 4 }}
 data:
+  TZ: {{ .Values.teslamate.config.timezone | quote }}
   DATABASE_HOST: {{ default (include "teslamate.databaseHost" .) .Values.teslamateApi.config.databaseHost | quote }}
   DATABASE_PORT: {{ .Values.teslamateApi.config.databasePort | quote }}
   DATABASE_NAME: {{ .Values.teslamateApi.config.databaseName | quote }}
