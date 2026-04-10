@@ -45,7 +45,7 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 | `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. |
 | `mosquitto` | MQTT broker image, persistence, resources. |
-| `teslamateApi` | Set `enabled: true` to deploy TeslaMate API; configure `config` and `existingSecret`. |
+| `teslamateApi` | Set `enabled: true` to deploy TeslaMate API. Reuses `teslamate.existingSecret` for `ENCRYPTION_KEY` and `DATABASE_PASS` unless `teslamateApi.existingSecret` is set. |
 
 All components support `resources.requests` and `resources.limits`. Defaults are set to reasonable values; override in your values file as needed.
 

@@ -22,7 +22,7 @@ mosquitto:
   persistence:
     existingClaim: ""  # e.g. mosquitto-pvc
 
-# Optional: enable TeslaMate API
+# Optional: TeslaMate API (leave existingSecret empty to reuse teslamate.existingSecret)
 teslamateApi:
-  enabled: false
+  enabled: true
   existingSecret: ""
