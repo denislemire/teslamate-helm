@@ -40,6 +40,13 @@ spec:
                 secretKeyRef:
                   name: {{ $secretName | quote }}
                   key: {{ $passKey | quote }}
+            {{- if .Values.teslamateApi.apiTokenExistingSecret }}
+            - name: API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.teslamateApi.apiTokenExistingSecret | quote }}
+                  key: {{ default "API_TOKEN" .Values.teslamateApi.apiTokenSecretKey | quote }}
+            {{- end }}
           ports:
             - containerPort: 8080
               name: http
