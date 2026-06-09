@@ -1,3 +1,7 @@
 *.sql
+*.sql.gz
+INCIDENT-REPORT*.md
+MIGRATION-REPORT.md
 .git/
 .gitignore
+docs/
