@@ -53,21 +53,15 @@ commands:
             printf '%s' "${KUBE_CA_B64}" | base64 --decode > /tmp/ehws-ca.crt
 
             access_token="$(
-              TOKEN_RESPONSE="$(
-                curl -fsSL -X POST "${AUTHENTIK_OIDC_TOKEN_URL}" \
-                  -H 'Content-Type: application/x-www-form-urlencoded' \
-                  --data-urlencode 'grant_type=client_credentials' \
-                  --data-urlencode 'scope=openid profile' \
-                  --data-urlencode "client_id=${AUTHENTIK_CLIENT_ID}" \
-                  --data-urlencode 'client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer' \
-                  --data-urlencode "client_assertion=${CIRCLE_OIDC_TOKEN_V2}"
-              )" python3 -c "
-            import json, os, sys
-            token = json.loads(os.environ['TOKEN_RESPONSE']).get('access_token', '')
-            if not token:
-                sys.exit(1)
-            print(token, end='')
-            ")"
+              curl -fsSL -X POST "${AUTHENTIK_OIDC_TOKEN_URL}" \
+                -H 'Content-Type: application/x-www-form-urlencoded' \
+                --data-urlencode 'grant_type=client_credentials' \
+                --data-urlencode 'scope=openid profile' \
+                --data-urlencode "client_id=${AUTHENTIK_CLIENT_ID}" \
+                --data-urlencode 'client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer' \
+                --data-urlencode "client_assertion=${CIRCLE_OIDC_TOKEN_V2}" \
+                | jq -er '.access_token'
+            )"
 
             kubectl config set-cluster ehws \
               --server="${KUBE_API_SERVER}" \
