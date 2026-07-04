@@ -1,0 +1,223 @@
+version: '2.1'
+
+# Continuation phase selected by .circleci/config.yml path filtering.
+#
+# Relevant feature-branch commits lint and template-render a candidate.
+# Relevant master commits additionally publish the packaged chart to Zot
+# and verify Flux picked it up. There is no image to build/validate/promote
+# here -- this repo only ships a Helm chart that consumes upstream
+# teslamate/teslamate-grafana images.
+#
+# ┌─ OIDC flow ──────────────────────────────────────────────────────────────────┐
+# │  CIRCLE_OIDC_TOKEN_V2 is auto-injected for jobs in the ehws-authentik-oidc  │
+# │  context.  It is a short-lived JWT signed by CircleCI Server.               │
+# │                                                                              │
+# │  kubernetes-cluster  →  kubeconfig (cluster-reader + registry-push-auth)   │
+# │    USE FOR: short-lived Kubernetes access to fetch registry credentials    │
+# │    and to poll Flux/rollout status. No static kubeconfig or registry        │
+# │    password is ever stored in CircleCI.                                    │
+# └──────────────────────────────────────────────────────────────────────────────┘
+#
+# Context: ehws-authentik-oidc
+#   AUTHENTIK_OIDC_TOKEN_URL — Authentik token endpoint
+#   AUTHENTIK_CLIENT_ID      — kubernetes-cluster (for kubectl OIDC)
+#   KUBE_API_SERVER          — K3s API server URL
+#   KUBE_CA_B64              — base64-encoded cluster CA certificate
+
+parameters:
+  run_chart_pipeline:
+    type: boolean
+    default: false
+
+executors:
+  default:
+    docker:
+      - image: cimg/base:2026.06
+    resource_class: denislemire/ehws
+
+commands:
+  oidc_kubeconfig:
+    description: "Exchange CIRCLE_OIDC_TOKEN_V2 for a short-lived kubeconfig"
+    steps:
+      - run:
+          name: Exchange OIDC token for kubeconfig
+          command: |
+            set -euo pipefail
+
+            for key in AUTHENTIK_OIDC_TOKEN_URL AUTHENTIK_CLIENT_ID KUBE_API_SERVER KUBE_CA_B64; do
+              if [[ -z "${!key:-}" ]]; then
+                echo "Missing context variable: ${key}" >&2; exit 1
+              fi
+            done
+
+            printf '%s' "${KUBE_CA_B64}" | base64 --decode > /tmp/ehws-ca.crt
+
+            access_token="$(
+              curl -fsSL -X POST "${AUTHENTIK_OIDC_TOKEN_URL}" \
+                -H 'Content-Type: application/x-www-form-urlencoded' \
+                --data-urlencode 'grant_type=client_credentials' \
+                --data-urlencode 'scope=openid profile' \
+                --data-urlencode "client_id=${AUTHENTIK_CLIENT_ID}" \
+                --data-urlencode 'client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer' \
+                --data-urlencode "client_assertion=${CIRCLE_OIDC_TOKEN_V2}" \
+                | jq -er '.access_token'
+            )"
+
+            kubectl config set-cluster ehws \
+              --server="${KUBE_API_SERVER}" \
+              --certificate-authority=/tmp/ehws-ca.crt \
+              --embed-certs=true
+            kubectl config set-credentials circleci-oidc --token="${access_token}"
+            kubectl config set-context ehws --cluster=ehws --user=circleci-oidc
+            kubectl config use-context ehws
+            kubectl get nodes --request-timeout=20s -o wide
+
+  install_kubectl:
+    steps:
+      - run:
+          name: Install kubectl
+          command: |
+            set -euo pipefail
+            curl --retry 5 --retry-all-errors --connect-timeout 10 -fsSL \
+              'https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl' \
+              -o /tmp/kubectl
+            chmod +x /tmp/kubectl
+            sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+  install_helm:
+    steps:
+      - run:
+          name: Install helm
+          command: |
+            set -euo pipefail
+            curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 \
+              | bash
+
+jobs:
+  validate-chart:
+    executor: default
+    steps:
+      - checkout
+      - install_helm
+      - run:
+          name: helm lint
+          command: |
+            set -euo pipefail
+            helm lint .
+      - run:
+          name: helm template (default values)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate > /tmp/rendered-default.yaml
+            echo "Rendered $(grep -c '^kind:' /tmp/rendered-default.yaml) objects with default values"
+      - run:
+          name: helm template (teslamateApi enabled, matching live values shape)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set teslamateApi.enabled=true \
+              --set teslamateApi.existingSecret=teslamate-api-secret \
+              > /tmp/rendered-api-enabled.yaml
+            echo "Rendered $(grep -c '^kind:' /tmp/rendered-api-enabled.yaml) objects with teslamateApi enabled"
+
+  publish-chart:
+    executor: default
+    steps:
+      - checkout
+      - install_kubectl
+      - install_helm
+      - oidc_kubeconfig
+      - run:
+          name: Fetch Zot push credentials and publish chart
+          command: |
+            set -euo pipefail
+            ZOT_REGISTRY="registry.ehws.generic.business"
+            # helm registry login doesn't support bearer tokens; use admin password
+            # fetched via OIDC kubectl from the cluster secret (no stored CI creds).
+            ZOT_PASS="$(
+              kubectl get secret registry-push-auth -n teslamate \
+                -o jsonpath='{.data.password}' | base64 --decode
+            )"
+            printf '%s' "${ZOT_PASS}" \
+              | helm registry login "${ZOT_REGISTRY}" --username admin --password-stdin
+            CHART_VERSION="$(grep '^version:' Chart.yaml | awk '{print $2}')"
+            mkdir -p /tmp/charts
+            helm package . --destination /tmp/charts/
+            helm push "/tmp/charts/teslamate-${CHART_VERSION}.tgz" \
+              "oci://${ZOT_REGISTRY}"
+            echo "Pushed: oci://${ZOT_REGISTRY}/teslamate:${CHART_VERSION}"
+
+  verify-deployment:
+    executor: default
+    steps:
+      - checkout
+      - install_kubectl
+      - oidc_kubeconfig
+      - run:
+          name: Verify Flux HelmRelease is reconciled
+          command: |
+            set -euo pipefail
+            CHART_VERSION="$(grep '^version:' Chart.yaml | awk '{print $2}')"
+
+            # NOTE: ehws-infra's teslamate HelmRelease currently pins an exact
+            # chart.spec.version (no semver range), so Flux will not pick up a
+            # newly published chart version until that pin is bumped or changed
+            # to a range (e.g. >=0.2.4) in a follow-up ehws-infra change. Until
+            # then, this just confirms Flux is Ready and reconciled at whatever
+            # version is currently pinned, and reports whether it already
+            # matches the version just published so drift is visible in logs.
+            configured_version=""
+            for attempt in $(seq 1 90); do
+              ready=$(kubectl -n teslamate get helmrelease teslamate -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+              configured_version=$(kubectl -n teslamate get helmrelease teslamate -o jsonpath='{.spec.chart.spec.version}' 2>/dev/null || true)
+              echo "HelmRelease ready=${ready:-pending} pinned-version=${configured_version:-pending} just-published=${CHART_VERSION}"
+              [[ "${ready}" == "True" ]] && break
+              sleep 10
+            done
+            [[ "${ready}" == "True" ]]
+
+            if [[ "${configured_version}" == "${CHART_VERSION}" ]]; then
+              echo "HelmRelease is pinned to the chart version just published (${CHART_VERSION})."
+            else
+              echo "NOTE: HelmRelease is pinned to ${configured_version}, not the just-published ${CHART_VERSION}." >&2
+              echo "This is expected until ehws-infra's chart.spec.version is bumped or made a semver range." >&2
+            fi
+
+            kubectl -n teslamate rollout status deployment/teslamate --timeout=15m
+            kubectl -n teslamate rollout status deployment/teslamate-grafana --timeout=15m
+            kubectl -n teslamate rollout status statefulset/teslamate-db --timeout=15m
+
+            if kubectl -n teslamate get deployment teslamateapi >/dev/null 2>&1; then
+              kubectl -n teslamate rollout status deployment/teslamateapi --timeout=15m
+            fi
+            if kubectl -n teslamate get deployment mosquitto >/dev/null 2>&1; then
+              kubectl -n teslamate rollout status deployment/mosquitto --timeout=15m
+            fi
+
+            kubectl -n teslamate get pods -o wide
+
+workflows:
+  validate-candidate:
+    when:
+      and:
+        - << pipeline.parameters.run_chart_pipeline >>
+        - not:
+            equal: [master, << pipeline.git.branch >>]
+    jobs:
+      - validate-chart
+
+  release-from-master:
+    when:
+      and:
+        - << pipeline.parameters.run_chart_pipeline >>
+        - equal: [master, << pipeline.git.branch >>]
+    jobs:
+      - validate-chart
+      - publish-chart:
+          context: ehws-authentik-oidc
+          requires:
+            - validate-chart
+      - verify-deployment:
+          context: ehws-authentik-oidc
+          requires:
+            - publish-chart

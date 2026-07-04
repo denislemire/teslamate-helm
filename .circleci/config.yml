@@ -1,55 +1,31 @@
-# Publish TeslaMate Helm chart to an OCI registry.
-# Triggers: tag push matching v* (e.g. v0.1.1).
-# Manual: Trigger pipeline with parameter run-publish=true.
+version: '2.1'
+
+# Setup phase: continue only when a change can affect the packaged chart or
+# its validation contract. This is a chart-only repo -- it consumes upstream
+# teslamate/teslamate-grafana images directly, so there is no Dockerfile and
+# no image build/validate/promote step here, only the Helm chart itself.
 #
-# Required context/env vars (set in CircleCI project or context):
-#   OCI_REGISTRY    - Registry host (e.g. registry.example.com)
-#   OCI_REGISTRY_USER - Registry username (default: admin)
-#   OCI_REGISTRY_PASSWORD - Registry password
-version: 2.1
-parameters:
-  run-publish:
-    type: boolean
-    default: false
-jobs:
-  publish-oci:
-    docker:
-      - image: alpine:3.19
-    steps:
-      - checkout
-      - run:
-          name: Install Helm and package chart
-          command: |
-            set -e
-            apk add --no-cache curl
-            HELM_VER="3.18.3"
-            curl -sSL "https://get.helm.sh/helm-v${HELM_VER}-linux-amd64.tar.gz" | tar xz -C /tmp linux-amd64/helm --strip-components=1
-            mv /tmp/helm /usr/local/bin/
-            helm package .
-            CHART_TGZ=$(ls -1 teslamate-*.tgz 2>/dev/null | head -1)
-            [ -n "$CHART_TGZ" ] || { echo "Chart package failed"; exit 1; }
-            echo "$CHART_TGZ" > /tmp/chart_name
-      - run:
-          name: Push to OCI registry
-          command: |
-            set -e
-            CHART_TGZ=$(cat /tmp/chart_name)
-            REGISTRY_USER="${OCI_REGISTRY_USER:-admin}"
-            [ -n "$OCI_REGISTRY" ] || { echo "OCI_REGISTRY not set"; exit 1; }
-            [ -n "$OCI_REGISTRY_PASSWORD" ] || { echo "OCI_REGISTRY_PASSWORD not set"; exit 1; }
-            echo "$OCI_REGISTRY_PASSWORD" | helm registry login "$OCI_REGISTRY" -u "$REGISTRY_USER" --password-stdin
-            helm push "$CHART_TGZ" "oci://${OCI_REGISTRY}/teslamate"
-            echo "Pushed $CHART_TGZ to OCI registry"
+# Every commit's changed files are diffed against master (the merge base), so
+# a feature branch always sees the full set of changes since it diverged, and
+# a push to master itself falls back to comparing against its parent commit.
+# The continuation config then decides, per branch, whether to just lint and
+# template the chart or to also publish it and verify the Flux deployment.
+setup: true
+
+orbs:
+  path-filtering: circleci/path-filtering@2
 
 workflows:
-  version: 2
-  publish-on-tag:
+  detect-chart-changes:
     jobs:
-      - publish-oci:
-          filters:
-            tags:
-              only: /^v.*/
-  publish-manual:
-    when: { equal: [ true, << pipeline.parameters.run-publish >> ] }
-    jobs:
-      - publish-oci
+      - path-filtering/filter:
+          name: detect-chart-changes
+          base-revision: master
+          config-path: .circleci/continue_config.yml
+          circleci_domain: circle.ehws.generic.business
+          resource_class: denislemire/ehws
+          mapping: |
+            ^\.circleci/.* run_chart_pipeline true
+            ^templates/.* run_chart_pipeline true
+            ^Chart\.yaml$ run_chart_pipeline true
+            ^values\.yaml$ run_chart_pipeline true
