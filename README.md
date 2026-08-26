@@ -22,17 +22,19 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
    If your secret uses different key names, set the `existingSecret*Key` values in `values.yaml` (e.g. `database.existingSecretUserKey`, `teslamate.existingSecretEncryptionKey`).
 
-2. Install the chart:
+2. Install the chart from a [GitHub Release](https://github.com/denislemire/teslamate-helm/releases). Each release attaches `teslamate-<version>.tgz` (for example `v0.2.6` → `teslamate-0.2.6.tgz`):
 
    ```bash
-   helm repo add <your-repo> <repo-url>
-   helm install teslamate <your-repo>/teslamate -n teslamate --create-namespace -f values.yaml
+   VERSION=0.2.6  # https://github.com/denislemire/teslamate-helm/releases
+   helm upgrade --install teslamate \
+     "https://github.com/denislemire/teslamate-helm/releases/download/v${VERSION}/teslamate-${VERSION}.tgz" \
+     -n teslamate --create-namespace -f my-values.yaml
    ```
 
-   Or from the chart directory:
+   Or from a clone of this repository:
 
    ```bash
-   helm install teslamate . -n teslamate --create-namespace -f my-values.yaml
+   helm upgrade --install teslamate . -n teslamate --create-namespace -f my-values.yaml
    ```
 
 3. Set `teslamate.config.virtualHost` and `grafana.config.domain` to your public host (e.g. for reverse proxy). Default is `localhost`.
