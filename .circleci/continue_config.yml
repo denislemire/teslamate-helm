@@ -3,10 +3,10 @@ version: '2.1'
 # Continuation phase selected by .circleci/config.yml path filtering.
 #
 # Relevant feature-branch commits lint and template-render a candidate.
-# Relevant master commits additionally attach the packaged chart to a
-# GitHub Release. There is no image to build/validate/promote here -- this
-# repo only ships a Helm chart that consumes upstream teslamate/teslamate-grafana
-# images.
+# Relevant master commits attach the packaged chart to a GitHub Release
+# after a manual approval downstream of publish-chart.
+# There is no image to build/validate/promote here -- this repo only ships
+# a Helm chart that consumes upstream teslamate/teslamate-grafana images.
 #
 # ┌─ OIDC flow ──────────────────────────────────────────────────────────────────┐
 # │  CIRCLE_OIDC_TOKEN_V2 is auto-injected for jobs in the ehws-authentik-oidc  │
@@ -258,11 +258,15 @@ workflows:
           context: ehws-authentik-oidc
           requires:
             - validate-chart
-      - publish-github-release:
-          context: teslamate-github-publish
-          requires:
-            - validate-chart
       - verify-deployment:
           context: ehws-authentik-oidc
           requires:
             - publish-chart
+      - hold-github-release:
+          type: approval
+          requires:
+            - publish-chart
+      - publish-github-release:
+          context: teslamate-github-publish
+          requires:
+            - hold-github-release
