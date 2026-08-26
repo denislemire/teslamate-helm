@@ -3,10 +3,10 @@ version: '2.1'
 # Continuation phase selected by .circleci/config.yml path filtering.
 #
 # Relevant feature-branch commits lint and template-render a candidate.
-# Relevant master commits additionally publish the packaged chart to Zot
-# and verify Flux picked it up. There is no image to build/validate/promote
-# here -- this repo only ships a Helm chart that consumes upstream
-# teslamate/teslamate-grafana images.
+# Relevant master commits additionally attach the packaged chart to a
+# GitHub Release. There is no image to build/validate/promote here -- this
+# repo only ships a Helm chart that consumes upstream teslamate/teslamate-grafana
+# images.
 #
 # ┌─ OIDC flow ──────────────────────────────────────────────────────────────────┐
 # │  CIRCLE_OIDC_TOKEN_V2 is auto-injected for jobs in the ehws-authentik-oidc  │
@@ -23,6 +23,14 @@ version: '2.1'
 #   AUTHENTIK_CLIENT_ID      — kubernetes-cluster (for kubectl OIDC)
 #   KUBE_API_SERVER          — K3s API server URL
 #   KUBE_CA_B64              — base64-encoded cluster CA certificate
+#
+# Context: teslamate-github-publish
+#   GITHUB_TOKEN — fine-grained PAT, Contents: Read and write on this repo
+#                  (gh release create + asset upload). Metadata: Read is automatic.
+
+orbs:
+  github-cli: circleci/github-cli@3.0.0
+  helm: circleci/helm@3.2.0
 
 parameters:
   run_chart_pipeline:
@@ -147,6 +155,39 @@ jobs:
               "oci://${ZOT_REGISTRY}"
             echo "Pushed: oci://${ZOT_REGISTRY}/teslamate:${CHART_VERSION}"
 
+  publish-github-release:
+    executor: default
+    # teslamate-github-publish supplies GITHUB_TOKEN (Contents: read/write).
+    steps:
+      - checkout
+      - helm/install_helm_client:
+          version: v3.16.4
+      - github-cli/setup:
+          token: GITHUB_TOKEN
+      - run:
+          name: Package chart and create GitHub Release
+          command: |
+            set -euo pipefail
+            CHART_VERSION="$(awk '/^version:/{print $2; exit}' Chart.yaml)"
+            TAG="v${CHART_VERSION}"
+            mkdir -p /tmp/charts
+            helm package . --destination /tmp/charts
+            TGZ="/tmp/charts/teslamate-${CHART_VERSION}.tgz"
+            test -f "${TGZ}"
+
+            if gh release view "${TAG}" >/dev/null 2>&1; then
+              echo "GitHub Release ${TAG} already exists; leaving it unchanged."
+              echo "Bump Chart.yaml version to publish a new chart tarball."
+            else
+              gh release create "${TAG}" "${TGZ}" \
+                --title "TeslaMate Helm ${TAG}" \
+                --generate-notes \
+                --target "${CIRCLE_SHA1}"
+            fi
+
+            echo "Release: https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/releases/tag/${TAG}"
+            echo "Install: helm install teslamate https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/releases/download/${TAG}/teslamate-${CHART_VERSION}.tgz"
+
   verify-deployment:
     executor: default
     steps:
@@ -215,6 +256,10 @@ workflows:
       - validate-chart
       - publish-chart:
           context: ehws-authentik-oidc
+          requires:
+            - validate-chart
+      - publish-github-release:
+          context: teslamate-github-publish
           requires:
             - validate-chart
       - verify-deployment:
