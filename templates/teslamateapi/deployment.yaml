@@ -21,14 +21,21 @@ spec:
     metadata:
       labels:
         {{- include "teslamate.api.selectorLabels" . | nindent 8 }}
+      {{- include "teslamate.podAnnotations" .Values.teslamateApi | nindent 6 }}
     spec:
+      {{- include "teslamate.podPlacement" (dict "component" .Values.teslamateApi "root" .) | nindent 6 }}
+      {{- include "teslamate.podSecurityContext" .Values.teslamateApi | nindent 6 }}
       containers:
         - name: teslamateapi
           image: "{{ .Values.teslamateApi.image.registry }}{{ .Values.teslamateApi.image.repository }}:{{ .Values.teslamateApi.image.tag }}"
           imagePullPolicy: {{ .Values.teslamateApi.image.pullPolicy }}
+          {{- include "teslamate.containerSecurityContext" .Values.teslamateApi | nindent 10 }}
           envFrom:
             - configMapRef:
                 name: teslamateapi-config
+            {{- with .Values.teslamateApi.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ENCRYPTION_KEY
               valueFrom:
@@ -46,6 +53,21 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.teslamateApi.apiTokenExistingSecret | quote }}
                   key: {{ default "API_TOKEN" .Values.teslamateApi.apiTokenSecretKey | quote }}
+            {{- end }}
+            {{- if .Values.mosquitto.auth.existingSecret }}
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mosquitto.auth.existingSecret | quote }}
+                  key: {{ .Values.mosquitto.auth.existingSecretUsernameKey | quote }}
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mosquitto.auth.existingSecret | quote }}
+                  key: {{ .Values.mosquitto.auth.existingSecretPasswordKey | quote }}
+            {{- end }}
+            {{- with .Values.teslamateApi.extraEnv }}
+            {{- toYaml . | nindent 12 }}
             {{- end }}
           ports:
             - containerPort: 8080

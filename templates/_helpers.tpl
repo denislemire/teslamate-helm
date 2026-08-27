@@ -108,17 +108,37 @@ app: teslamateapi
 {{- end }}
 
 {{/*
-Postgres service host (for use in env vars)
+Postgres host. In-cluster Service when database.enabled; otherwise database.host.
 */}}
 {{- define "teslamate.databaseHost" -}}
+{{- if .Values.database.host }}
+{{- .Values.database.host }}
+{{- else if .Values.database.enabled }}
 {{- printf "postgres.%s.svc.cluster.local" .Release.Namespace }}
+{{- else }}
+{{- fail "database.host is required when database.enabled is false" }}
+{{- end }}
+{{- end }}
+
+{{- define "teslamate.databasePort" -}}
+{{- .Values.database.port | default 5432 }}
 {{- end }}
 
 {{/*
-Mosquitto service host
+Mosquitto host. In-cluster Service when mosquitto.enabled; otherwise mosquitto.host.
 */}}
 {{- define "teslamate.mosquittoHost" -}}
+{{- if .Values.mosquitto.host }}
+{{- .Values.mosquitto.host }}
+{{- else if .Values.mosquitto.enabled }}
 {{- printf "mosquitto.%s.svc.cluster.local" .Release.Namespace }}
+{{- else }}
+{{- fail "mosquitto.host is required when mosquitto.enabled is false" }}
+{{- end }}
+{{- end }}
+
+{{- define "teslamate.mosquittoPort" -}}
+{{- .Values.mosquitto.port | default 1883 }}
 {{- end }}
 
 {{/*

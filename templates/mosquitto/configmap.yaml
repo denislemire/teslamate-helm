@@ -1,3 +1,4 @@
+{{- if .Values.mosquitto.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,3 +12,6 @@ data:
     # TeslaMate, TeslaMate API, and MQTT clients (e.g. Home Assistant) connect without auth.
     listener 1883
     allow_anonymous true
+    persistence true
+    persistence_location /mosquitto/data/
+{{- end }}

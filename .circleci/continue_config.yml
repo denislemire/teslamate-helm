@@ -127,6 +127,33 @@ jobs:
               --set teslamateApi.existingSecret=teslamate-api-secret \
               > /tmp/rendered-api-enabled.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-api-enabled.yaml) objects with teslamateApi enabled"
+      - run:
+          name: helm template (external postgres and mqtt)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set database.enabled=false \
+              --set database.host=cnpg-rw.postgres.svc.cluster.local \
+              --set mosquitto.enabled=false \
+              --set mosquitto.host=mosquitto.home-assistant.svc.cluster.local \
+              --set mosquitto.auth.existingSecret=mqtt-secret \
+              --set teslamate.existingSecret=tm \
+              --set grafana.existingSecret=gf \
+              > /tmp/rendered-external.yaml
+            grep -q 'cnpg-rw.postgres.svc.cluster.local' /tmp/rendered-external.yaml
+            grep -q 'MQTT_USERNAME' /tmp/rendered-external.yaml
+            if grep -q '^kind: StatefulSet$' /tmp/rendered-external.yaml; then
+              echo "bundled database should be omitted" >&2
+              exit 1
+            fi
+            if grep -q 'name: mosquitto$' /tmp/rendered-external.yaml; then
+              echo "bundled mosquitto should be omitted" >&2
+              exit 1
+            fi
+            if helm template teslamate . --namespace teslamate --set database.enabled=false >/tmp/should-fail.yaml; then
+              echo "expected fail when database.enabled is false without host" >&2
+              exit 1
+            fi
 
   publish-chart:
     executor: default

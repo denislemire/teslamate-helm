@@ -22,10 +22,10 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
    If your secret uses different key names, set the `existingSecret*Key` values in `values.yaml` (e.g. `database.existingSecretUserKey`, `teslamate.existingSecretEncryptionKey`).
 
-2. Install the chart from a [GitHub Release](https://github.com/denislemire/teslamate-helm/releases). Each release attaches `teslamate-<version>.tgz` (for example `v0.2.6` → `teslamate-0.2.6.tgz`):
+2. Install the chart from a [GitHub Release](https://github.com/denislemire/teslamate-helm/releases). Each release attaches `teslamate-<version>.tgz` (for example `v0.2.8` → `teslamate-0.2.8.tgz`):
 
    ```bash
-   VERSION=0.2.6  # https://github.com/denislemire/teslamate-helm/releases
+   VERSION=0.2.8  # https://github.com/denislemire/teslamate-helm/releases
    helm upgrade --install teslamate \
      "https://github.com/denislemire/teslamate-helm/releases/download/v${VERSION}/teslamate-${VERSION}.tgz" \
      -n teslamate --create-namespace -f my-values.yaml
@@ -43,13 +43,38 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Postgres image, persistence, resource limits. Use `persistence.existingClaim` to attach to an existing PVC. |
-| `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. |
-| `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. |
-| `mosquitto` | MQTT broker image, persistence, resources. |
+| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. |
+| `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. Use `extraEnv` / `extraEnvFrom` for any TeslaMate env not first-class in the chart (`MQTT_NAMESPACE`, `DATABASE_SSL`, `TZ`, Home Assistant discovery, …). |
+| `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. Set `fixPermissions: false` and `podSecurityContext.fsGroup: 472` for Pod Security `restricted`. Behind TLS ingress, set `config.rootUrl` to `https://%(domain)s/grafana`. |
+| `mosquitto` | Bundled MQTT broker (anonymous). Set `enabled: false` and `host` to use an existing broker. `auth.existingSecret` injects `MQTT_USERNAME` / `MQTT_PASSWORD` into TeslaMate (and TeslaMate API). |
 | `teslamateApi` | Set `enabled: true` to deploy TeslaMate API. Reuses `teslamate.existingSecret` for `ENCRYPTION_KEY` and `DATABASE_PASS` unless `teslamateApi.existingSecret` is set. |
 
-All components support `resources.requests` and `resources.limits`. Defaults are set to reasonable values; override in your values file as needed.
+Every component also accepts `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, `securityContext`, `extraEnv`, and `extraEnvFrom`.
+
+### Existing Postgres or MQTT
+
+```yaml
+database:
+  enabled: false
+  host: teslamate-rw.postgres.svc.cluster.local
+  port: 5432
+  existingSecret: teslamate-secrets   # still used by Grafana/TeslaMate for DB creds
+
+mosquitto:
+  enabled: false
+  host: mosquitto.home-assistant.svc.cluster.local
+  port: 1883
+  auth:
+    existingSecret: mqtt-secret
+    existingSecretUsernameKey: MQTT_USERNAME
+    existingSecretPasswordKey: MQTT_PASSWORD
+```
+
+`database.host` / `mosquitto.host` are required when the matching `enabled` flag is false.
+
+The bundled Mosquitto listener remains `allow_anonymous true`. Point TeslaMate at an external authenticated broker rather than turning auth on for the in-chart broker.
+
+Grafana `NOTES.txt` and port-forwards use `/grafana` when `serveFromSubPath` is true (the default).
 
 ## Migration from Docker or existing K8s manifests
 

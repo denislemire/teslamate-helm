@@ -9,13 +9,13 @@ metadata:
 data:
   TZ: {{ .Values.teslamate.config.timezone | quote }}
   DATABASE_HOST: {{ default (include "teslamate.databaseHost" .) .Values.teslamateApi.config.databaseHost | quote }}
-  DATABASE_PORT: {{ .Values.teslamateApi.config.databasePort | quote }}
+  DATABASE_PORT: {{ default (include "teslamate.databasePort" .) .Values.teslamateApi.config.databasePort | quote }}
   DATABASE_NAME: {{ .Values.teslamateApi.config.databaseName | quote }}
   DATABASE_USER: {{ .Values.teslamateApi.config.databaseUser | quote }}
   DATABASE_SSL: {{ .Values.teslamateApi.config.databaseSsl | quote }}
   DATABASE_TIMEOUT: {{ .Values.teslamateApi.config.databaseTimeout | quote }}
   MQTT_HOST: {{ default (include "teslamate.mosquittoHost" .) .Values.teslamateApi.config.mqttHost | quote }}
-  MQTT_PORT: {{ .Values.teslamateApi.config.mqttPort | quote }}
+  MQTT_PORT: {{ default (include "teslamate.mosquittoPort" .) .Values.teslamateApi.config.mqttPort | quote }}
   MQTT_TLS: {{ .Values.teslamateApi.config.mqttTls | quote }}
   MQTT_CLIENTID: {{ .Values.teslamateApi.config.mqttClientId | quote }}
   MQTT_NAMESPACE: {{ .Values.teslamateApi.config.mqttNamespace | quote }}
