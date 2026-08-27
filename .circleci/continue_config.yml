@@ -127,6 +127,71 @@ jobs:
               --set teslamateApi.existingSecret=teslamate-api-secret \
               > /tmp/rendered-api-enabled.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-api-enabled.yaml) objects with teslamateApi enabled"
+      - run:
+          name: helm template (extraEnv / extraEnvFrom on every component)
+          command: |
+            set -euo pipefail
+            cat > /tmp/extra-env.yaml <<'EOF'
+            teslamate:
+              existingSecret: teslamate-secret
+              extraEnv:
+                - name: TM_EXTRA
+                  value: teslamate
+              extraEnvFrom:
+                - secretRef:
+                    name: tm-extra
+            grafana:
+              extraEnv:
+                - name: GF_EXTRA
+                  value: grafana
+            database:
+              extraEnv:
+                - name: DB_EXTRA
+                  value: database
+            mosquitto:
+              extraEnv:
+                - name: MQ_EXTRA
+                  value: mosquitto
+            teslamateApi:
+              enabled: true
+              extraEnv:
+                - name: API_EXTRA
+                  value: teslamateapi
+              extraEnvFrom:
+                - secretRef:
+                    name: api-extra
+            EOF
+            helm template teslamate . --namespace teslamate -f /tmp/extra-env.yaml \
+              > /tmp/rendered-extra-env.yaml
+            for v in TM_EXTRA GF_EXTRA DB_EXTRA MQ_EXTRA API_EXTRA; do
+              grep -q "name: $v" /tmp/rendered-extra-env.yaml \
+                || { echo "missing extraEnv var $v"; exit 1; }
+            done
+            # teslamateapi already declares envFrom; extraEnvFrom must extend that
+            # list, not emit a second envFrom key (last-key-wins would silently
+            # drop teslamateapi-config).
+            python3 - <<'PYEOF'
+            import yaml
+            class Strict(yaml.SafeLoader):
+                pass
+            def no_dup(loader, node, deep=False):
+                seen = set()
+                for k, _ in node.value:
+                    key = loader.construct_object(k, deep=deep)
+                    if key in seen:
+                        raise AssertionError("duplicate key in rendered manifest: %s" % key)
+                    seen.add(key)
+                return yaml.SafeLoader.construct_mapping(loader, node, deep)
+            Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, no_dup)
+            docs = list(yaml.load_all(open("/tmp/rendered-extra-env.yaml"), Strict))
+            api = next(d for d in docs if d and d["kind"] == "Deployment"
+                       and d["metadata"]["name"] == "teslamateapi")
+            refs = api["spec"]["template"]["spec"]["containers"][0]["envFrom"]
+            names = [list(r.values())[0]["name"] for r in refs]
+            assert names == ["teslamateapi-config", "api-extra"], names
+            print("extraEnv/extraEnvFrom render OK; no duplicate keys")
+            PYEOF
+            echo "Rendered $(grep -c '^kind:' /tmp/rendered-extra-env.yaml) objects with extraEnv set"
 
   publish-chart:
     executor: default

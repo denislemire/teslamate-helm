@@ -36,6 +36,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret | quote }}
                   key: {{ .Values.database.existingSecretDatabaseKey | quote }}
+          {{- with .Values.database.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.database.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 5432
               name: postgres

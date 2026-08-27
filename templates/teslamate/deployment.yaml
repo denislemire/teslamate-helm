@@ -53,6 +53,13 @@ spec:
                 configMapKeyRef:
                   name: teslamate-config
                   key: TM_TZ
+          {{- with .Values.teslamate.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.teslamate.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 4000
               name: http

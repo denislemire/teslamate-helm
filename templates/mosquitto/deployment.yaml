@@ -25,6 +25,14 @@ spec:
             - mosquitto
             - -c
             - /etc/mosquitto/mosquitto.conf
+          {{- with .Values.mosquitto.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.mosquitto.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 1883
               name: mqtt

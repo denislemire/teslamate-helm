@@ -51,6 +51,35 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 All components support `resources.requests` and `resources.limits`. Defaults are set to reasonable values; override in your values file as needed.
 
+### Extra environment variables
+
+Every component (`teslamate`, `grafana`, `database`, `mosquitto`, `teslamateApi`) accepts `extraEnv` and `extraEnvFrom`, appended after the variables the chart sets:
+
+```yaml
+teslamate:
+  extraEnv:
+    - name: MQTT_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: mqtt-credentials
+          key: username
+    - name: MQTT_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: mqtt-credentials
+          key: password
+    - name: DEFAULT_GEOFENCE
+      value: Home
+  extraEnvFrom:
+    - secretRef:
+        name: teslamate-extra
+```
+
+This is the escape hatch for TeslaMate settings the chart does not model directly. TeslaMate is configured entirely through environment variables, so `MQTT_USERNAME` / `MQTT_PASSWORD` / `MQTT_TLS` / `MQTT_NAMESPACE`, `DATABASE_PORT` / `DATABASE_SSL` / `DATABASE_IPV6`, `DISABLE_MQTT`, `DEFAULT_GEOFENCE`, `TZ`, `PORT`, `TESLA_API_HOST` / `TESLA_AUTH_HOST` and anything added upstream are all reachable without a chart change. See the [TeslaMate configuration docs](https://docs.teslamate.org/docs/configuration/environment_variables).
+
+Note these are *additional* variables — they don't override the ones the chart sets (`DATABASE_HOST`, `MQTT_HOST`, and the `existingSecret`-backed values), which stay under the dedicated values above.
+
+
 ## Migration from Docker or existing K8s manifests
 
 If you are moving from Docker Compose or hand-written Kubernetes manifests:

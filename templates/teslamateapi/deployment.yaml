@@ -29,6 +29,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: teslamateapi-config
+            {{- with .Values.teslamateApi.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           env:
             - name: ENCRYPTION_KEY
               valueFrom:
@@ -47,6 +50,9 @@ spec:
                   name: {{ .Values.teslamateApi.apiTokenExistingSecret | quote }}
                   key: {{ default "API_TOKEN" .Values.teslamateApi.apiTokenSecretKey | quote }}
             {{- end }}
+          {{- with .Values.teslamateApi.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 8080
               name: http

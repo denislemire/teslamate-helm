@@ -11,6 +11,12 @@ database:
     repository: postgres
     tag: "17"
     pullPolicy: IfNotPresent
+  # -- Additional environment variables for this container, appended after the
+  # ones the chart sets. Standard core/v1 EnvVar list, so `value` and
+  # `valueFrom` both work.
+  extraEnv: []
+  # -- Additional envFrom sources (configMapRef / secretRef).
+  extraEnvFrom: []
   # When set, use a Deployment with this PVC (keeps existing data when migrating).
   # When empty, use StatefulSet with new PVC from volumeClaimTemplate.
   persistence:
@@ -45,6 +51,12 @@ teslamate:
   existingSecretUserKey: "TM_DB_USER"      # or DATABASE_USER
   existingSecretPasswordKey: "TM_DB_PASS"
   existingSecretDatabaseKey: "TM_DB_NAME"
+  # -- Additional environment variables for this container, appended after the
+  # ones the chart sets. Standard core/v1 EnvVar list, so `value` and
+  # `valueFrom` both work.
+  extraEnv: []
+  # -- Additional envFrom sources (configMapRef / secretRef).
+  extraEnvFrom: []
   config:
     # Public host for URLs (e.g. teslamate.example.com). Used for VIRTUAL_HOST and Grafana.
     virtualHost: "localhost"
@@ -73,6 +85,12 @@ grafana:
   existingSecretDatabaseKey: "TM_DB_NAME"
   existingSecretGrafanaUserKey: "GRAFANA_USER"
   existingSecretGrafanaPasswordKey: "GRAFANA_PW"
+  # -- Additional environment variables for this container, appended after the
+  # ones the chart sets. Standard core/v1 EnvVar list, so `value` and
+  # `valueFrom` both work.
+  extraEnv: []
+  # -- Additional envFrom sources (configMapRef / secretRef).
+  extraEnvFrom: []
   persistence:
     existingClaim: ""
     size: 5Gi
@@ -96,6 +114,12 @@ mosquitto:
     repository: eclipse-mosquitto
     tag: "2"
     pullPolicy: IfNotPresent
+  # -- Additional environment variables for this container, appended after the
+  # ones the chart sets. Standard core/v1 EnvVar list, so `value` and
+  # `valueFrom` both work.
+  extraEnv: []
+  # -- Additional envFrom sources (configMapRef / secretRef).
+  extraEnvFrom: []
   # No auth by default (per TeslaMate docs). Data volume for persistence.
   persistence:
     existingClaim: ""
@@ -125,6 +149,12 @@ teslamateApi:
   # Secret key name defaults to API_TOKEN (1Password field label).
   apiTokenExistingSecret: ""
   apiTokenSecretKey: "API_TOKEN"
+  # -- Additional environment variables for this container, appended after the
+  # ones the chart sets. Standard core/v1 EnvVar list, so `value` and
+  # `valueFrom` both work.
+  extraEnv: []
+  # -- Additional envFrom sources (configMapRef / secretRef).
+  extraEnvFrom: []
   config:
     # These are derived from release namespace when left empty
     databaseHost: ""

@@ -76,6 +76,13 @@ spec:
               value: {{ .Values.grafana.config.serveFromSubPath | quote }}
             - name: GF_UPDATE_CHECK_ENABLED
               value: "false"
+          {{- with .Values.grafana.extraEnv }}
+          {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.grafana.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 3000
               name: http
