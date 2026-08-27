@@ -119,7 +119,7 @@ jobs:
             helm template teslamate . --namespace teslamate > /tmp/rendered-default.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-default.yaml) objects with default values"
             grep -q 'name: PGDATA' /tmp/rendered-default.yaml
-            grep -q 'value: /var/lib/postgresql/data' /tmp/rendered-default.yaml
+            grep -A1 'name: PGDATA' /tmp/rendered-default.yaml | grep -q '/var/lib/postgresql/data'
       - run:
           name: helm template (teslamateApi enabled, matching live values shape)
           command: |
