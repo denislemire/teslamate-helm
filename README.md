@@ -25,7 +25,7 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 2. Install the chart from a [GitHub Release](https://github.com/denislemire/teslamate-helm/releases). Each release attaches `teslamate-<version>.tgz` (for example `v0.2.6` → `teslamate-0.2.6.tgz`):
 
    ```bash
-   VERSION=0.2.6  # https://github.com/denislemire/teslamate-helm/releases
+   VERSION=0.2.7  # https://github.com/denislemire/teslamate-helm/releases
    helm upgrade --install teslamate \
      "https://github.com/denislemire/teslamate-helm/releases/download/v${VERSION}/teslamate-${VERSION}.tgz" \
      -n teslamate --create-namespace -f my-values.yaml
@@ -43,7 +43,15 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Postgres image, persistence, resource limits. Use `persistence.existingClaim` to attach to an existing PVC. |
+| `database` | Postgres image, persistence, resource limits. Use `persistence.existingClaim` to attach to an existing PVC. Set `database.pgData` only if you change the data directory; the default matches the chart mount and is required for `postgres:18+`. |
+
+### Postgres 18+ (`database.image.tag`)
+
+Official `postgres:18` images default `PGDATA` to `/var/lib/postgresql/18/docker`, which this chart does not mount. Without an explicit `PGDATA`, initdb succeeds in the container writable layer, the pod looks healthy, and the database is empty after the next restart.
+
+The chart sets `PGDATA` to `database.pgData` (default `/var/lib/postgresql/data`), the same path as the PVC mount (`subPath: data`). That keeps existing 15/16/17 volumes working and persists a fresh 18 cluster on the PVC.
+
+Do not point `database.image.tag` at 18 on a volume that already has a 17 cluster and expect an in-place major upgrade; dump/restore or `pg_upgrade` as usual.
 | `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. |
 | `mosquitto` | MQTT broker image, persistence, resources. |
