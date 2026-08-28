@@ -36,12 +36,14 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret | quote }}
                   key: {{ .Values.database.existingSecretDatabaseKey | quote }}
+            - name: PGDATA
+              value: {{ .Values.database.pgData | quote }}
           ports:
             - containerPort: 5432
               name: postgres
           volumeMounts:
             - name: db-storage
-              mountPath: /var/lib/postgresql/data
+              mountPath: {{ .Values.database.pgData }}
               subPath: data
           resources:
             {{- toYaml .Values.database.resources | nindent 12 }}

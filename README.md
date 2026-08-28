@@ -25,7 +25,7 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 2. Install the chart from a [GitHub Release](https://github.com/denislemire/teslamate-helm/releases). Each release attaches `teslamate-<version>.tgz` (for example `v0.2.6` → `teslamate-0.2.6.tgz`):
 
    ```bash
-   VERSION=0.2.6  # https://github.com/denislemire/teslamate-helm/releases
+   VERSION=0.2.7  # https://github.com/denislemire/teslamate-helm/releases
    helm upgrade --install teslamate \
      "https://github.com/denislemire/teslamate-helm/releases/download/v${VERSION}/teslamate-${VERSION}.tgz" \
      -n teslamate --create-namespace -f my-values.yaml
@@ -43,13 +43,21 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Postgres image, persistence, resource limits. Use `persistence.existingClaim` to attach to an existing PVC. |
+| `database` | Postgres image, persistence, resource limits. Use `persistence.existingClaim` to attach to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. |
 | `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. |
 | `mosquitto` | MQTT broker image, persistence, resources. |
 | `teslamateApi` | Set `enabled: true` to deploy TeslaMate API. Reuses `teslamate.existingSecret` for `ENCRYPTION_KEY` and `DATABASE_PASS` unless `teslamateApi.existingSecret` is set. |
 
 All components support `resources.requests` and `resources.limits`. Defaults are set to reasonable values; override in your values file as needed.
+
+### Postgres 18+ (`database.image.tag`)
+
+Official `postgres:18` images moved `PGDATA` to `/var/lib/postgresql/18/docker` and declare `/var/lib/postgresql` as the volume. Because this chart mounts the PVC at `/var/lib/postgresql/data`, an unset `PGDATA` makes the image refuse to start on 18+ — it detects a mount at `/var/lib/postgresql/data` that isn't the data directory and exits 1 rather than risk splitting a cluster across mount points.
+
+The chart therefore sets `PGDATA` to `database.pgData` (default `/var/lib/postgresql/data`), matching the PVC mount. That keeps existing 15/16/17 volumes working untouched and lets a fresh 18 cluster live on the PVC. Note this deliberately differs from the layout docker-library suggests for 18+ (a single mount at `/var/lib/postgresql`), which would require migrating every existing volume; the trade-off is that a future in-place major upgrade can't use `pg_upgrade --link` across the mount boundary.
+
+Do not point `database.image.tag` at 18 on a volume that already has a 17 cluster and expect an in-place major upgrade; dump/restore or `pg_upgrade` as usual.
 
 ## Migration from Docker or existing K8s manifests
 
