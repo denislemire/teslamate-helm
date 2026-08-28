@@ -11,9 +11,10 @@ database:
     repository: postgres
     tag: "17"
     pullPolicy: IfNotPresent
-  # Pin PGDATA to the chart mount so official postgres:18+ does not initdb at
-  # /var/lib/postgresql/18/docker (ephemeral). Keep this equal to the volume
-  # mountPath; existing PVCs store the cluster in the `data` subPath.
+  # PGDATA and the PVC mountPath (kept in lockstep in the templates).
+  # Official postgres:18+ would otherwise refuse to start: the image defaults
+  # PGDATA to /var/lib/postgresql/18/docker and guards an unused mount at
+  # /var/lib/postgresql/data. Existing PVCs store the cluster in subPath data.
   pgData: /var/lib/postgresql/data
   # When set, use a Deployment with this PVC (keeps existing data when migrating).
   # When empty, use StatefulSet with new PVC from volumeClaimTemplate.

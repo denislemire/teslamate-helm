@@ -118,8 +118,21 @@ jobs:
             set -euo pipefail
             helm template teslamate . --namespace teslamate > /tmp/rendered-default.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-default.yaml) objects with default values"
-            grep -q 'name: PGDATA' /tmp/rendered-default.yaml
-            grep -A1 'name: PGDATA' /tmp/rendered-default.yaml | grep -q '/var/lib/postgresql/data'
+            grep -A1 'name: PGDATA' /tmp/rendered-default.yaml | grep -q 'value: "\?/var/lib/postgresql/data'
+      - run:
+          name: helm template (postgres 18 existingClaim Deployment)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set database.image.tag=18 \
+              --set database.persistence.existingClaim=foo \
+              > /tmp/rendered-pg18-claim.yaml
+            grep -A1 'name: PGDATA' /tmp/rendered-pg18-claim.yaml | grep -q 'value: "\?/var/lib/postgresql/data'
+            grep -q 'kind: Deployment' /tmp/rendered-pg18-claim.yaml
+            if grep -q 'kind: StatefulSet' /tmp/rendered-pg18-claim.yaml; then
+              echo "existingClaim should render a Deployment, not a StatefulSet" >&2
+              exit 1
+            fi
       - run:
           name: helm template (teslamateApi enabled, matching live values shape)
           command: |
