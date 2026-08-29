@@ -14,11 +14,15 @@ spec:
     metadata:
       labels:
         {{- include "teslamate.app.selectorLabels" . | nindent 8 }}
+      {{- include "teslamate.podAnnotations" .Values.teslamate | nindent 6 }}
     spec:
+      {{- include "teslamate.podPlacement" (dict "component" .Values.teslamate "root" .) | nindent 6 }}
+      {{- include "teslamate.podSecurityContext" .Values.teslamate | nindent 6 }}
       containers:
         - name: teslamate
           image: "{{ .Values.teslamate.image.registry }}{{ .Values.teslamate.image.repository }}:{{ .Values.teslamate.image.tag }}"
           imagePullPolicy: {{ .Values.teslamate.image.pullPolicy }}
+          {{- include "teslamate.containerSecurityContext" .Values.teslamate | nindent 10 }}
           env:
             - name: ENCRYPTION_KEY
               valueFrom:
@@ -42,8 +46,28 @@ spec:
                   key: {{ .Values.teslamate.existingSecretDatabaseKey | quote }}
             - name: DATABASE_HOST
               value: {{ include "teslamate.databaseHost" . | quote }}
+            - name: DATABASE_PORT
+              value: {{ include "teslamate.databasePort" . | quote }}
             - name: MQTT_HOST
               value: {{ include "teslamate.mosquittoHost" . | quote }}
+            - name: MQTT_PORT
+              value: {{ include "teslamate.mosquittoPort" . | quote }}
+            {{- if .Values.mosquitto.tls }}
+            - name: MQTT_TLS
+              value: "true"
+            {{- end }}
+            {{- if .Values.mosquitto.auth.existingSecret }}
+            - name: MQTT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mosquitto.auth.existingSecret | quote }}
+                  key: {{ .Values.mosquitto.auth.existingSecretUsernameKey | quote }}
+            - name: MQTT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.mosquitto.auth.existingSecret | quote }}
+                  key: {{ .Values.mosquitto.auth.existingSecretPasswordKey | quote }}
+            {{- end }}
             - name: CHECK_ORIGIN
               value: "true"
             - name: VIRTUAL_HOST
@@ -53,9 +77,30 @@ spec:
                 configMapKeyRef:
                   name: teslamate-config
                   key: TM_TZ
+            {{- with .Values.teslamate.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.teslamate.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 4000
               name: http
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
           volumeMounts:
             - name: import-storage
               mountPath: /opt/app/import

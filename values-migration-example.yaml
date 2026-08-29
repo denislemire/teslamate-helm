@@ -22,6 +22,22 @@ mosquitto:
   persistence:
     existingClaim: ""  # e.g. mosquitto-pvc
 
+# Example: existing Postgres + Home Assistant MQTT instead of bundled components
+# database:
+#   enabled: false
+#   host: teslamate-rw.postgres.svc.cluster.local
+#   port: 5432
+# mosquitto:
+#   enabled: false
+#   host: mosquitto.home-assistant.svc.cluster.local
+#   port: 1883
+#   auth:
+#     existingSecret: mqtt-secret
+# teslamate:
+#   extraEnv:
+#     - name: MQTT_NAMESPACE
+#       value: teslamate
+
 # Optional: TeslaMate API (leave existingSecret empty to reuse teslamate.existingSecret)
 teslamateApi:
   enabled: true

@@ -6,5 +6,4 @@ metadata:
   labels:
     {{- include "teslamate.app.selectorLabels" . | nindent 4 }}
 data:
-  FQDN_TM: {{ .Values.teslamate.config.virtualHost | quote }}
   TM_TZ: {{ .Values.teslamate.config.timezone | quote }}

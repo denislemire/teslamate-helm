@@ -1,3 +1,4 @@
+{{- if .Values.mosquitto.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,18 +17,42 @@ spec:
     metadata:
       labels:
         {{- include "teslamate.mosquitto.selectorLabels" . | nindent 8 }}
+      {{- include "teslamate.podAnnotations" .Values.mosquitto | nindent 6 }}
     spec:
+      {{- include "teslamate.podPlacement" (dict "component" .Values.mosquitto "root" .) | nindent 6 }}
+      {{- include "teslamate.podSecurityContext" .Values.mosquitto | nindent 6 }}
       containers:
         - name: mosquitto
           image: "{{ .Values.mosquitto.image.registry }}{{ .Values.mosquitto.image.repository }}:{{ .Values.mosquitto.image.tag }}"
           imagePullPolicy: {{ .Values.mosquitto.image.pullPolicy }}
+          {{- include "teslamate.containerSecurityContext" .Values.mosquitto | nindent 10 }}
           command:
             - mosquitto
             - -c
             - /etc/mosquitto/mosquitto.conf
+          {{- with .Values.mosquitto.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.mosquitto.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 1883
               name: mqtt
+          livenessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: mqtt
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
           volumeMounts:
             - name: mosquitto-data
               mountPath: /mosquitto/data
@@ -66,4 +91,5 @@ spec:
   {{- if .Values.mosquitto.persistence.storageClass }}
   storageClassName: {{ .Values.mosquitto.persistence.storageClass | quote }}
   {{- end }}
+{{- end }}
 {{- end }}

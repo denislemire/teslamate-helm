@@ -2,7 +2,7 @@ apiVersion: v2
 name: teslamate
 description: A Helm chart for TeslaMate - self-hosted data logger for Tesla vehicles
 type: application
-version: 0.2.7
+version: 0.2.8
 appVersion: "4.2.0"
 keywords:
   - teslamate
@@ -13,7 +13,9 @@ keywords:
 home: https://docs.teslamate.org
 sources:
   - https://github.com/teslamate-org/teslamate
-maintainers: []
+maintainers:
+  - name: Denis Lemire
+    url: https://github.com/denislemire
 license: MIT
 annotations:
   org.opencontainers.image.source: "https://github.com/denislemire/teslamate-helm"

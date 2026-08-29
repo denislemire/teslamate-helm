@@ -4,8 +4,14 @@
 nameOverride: ""
 fullnameOverride: ""
 
+imagePullSecrets: []
+
 # -- Database (Postgres). Required by TeslaMate and Grafana.
 database:
+  enabled: true
+  # Used when enabled is false, or to override the in-chart Service DNS name.
+  host: ""
+  port: 5432
   image:
     registry: ""
     repository: postgres
@@ -30,6 +36,15 @@ database:
   existingSecretUserKey: "TM_DB_USER"
   existingSecretPasswordKey: "TM_DB_PASS"
   existingSecretDatabaseKey: "TM_DB_NAME"
+  extraEnv: []
+  extraEnvFrom: []
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  imagePullSecrets: []
   resources:
     requests:
       cpu: 200m
@@ -57,6 +72,15 @@ teslamate:
   # Import volume for TeslaFi etc. Set existingClaim or leave empty for emptyDir.
   import:
     existingClaim: ""
+  extraEnv: []
+  extraEnvFrom: []
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  imagePullSecrets: []
   resources:
     requests:
       cpu: 200m
@@ -84,8 +108,27 @@ grafana:
     storageClass: ""
   config:
     domain: "localhost"  # GF_SERVER_DOMAIN; usually same as teslamate.config.virtualHost
+    # Behind TLS-terminating ingress, Grafana's own protocol is http, so %(protocol)s
+    # produces http:// share links. Override to https://%(domain)s/grafana in that case.
     rootUrl: "%(protocol)s://%(domain)s/grafana"
     serveFromSubPath: true
+  # uid 0 chown of the Grafana PVC on every start. Required on some NFS volumes;
+  # disable and set podSecurityContext.fsGroup: 472 for Pod Security restricted.
+  fixPermissions: true
+  busyboxImage:
+    registry: ""
+    repository: busybox
+    tag: "1.37.0"
+    pullPolicy: IfNotPresent
+  extraEnv: []
+  extraEnvFrom: []
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  imagePullSecrets: []
   resources:
     requests:
       cpu: 200m
@@ -96,16 +139,42 @@ grafana:
 
 # -- MQTT broker (Mosquitto)
 mosquitto:
+  enabled: true
+  # Used when enabled is false, or to override the in-chart Service DNS name.
+  host: ""
+  port: 1883
+  tls: false
   image:
     registry: ""
     repository: eclipse-mosquitto
     tag: "2"
     pullPolicy: IfNotPresent
-  # No auth by default (per TeslaMate docs). Data volume for persistence.
+  # Credentials for TeslaMate (and optional API) to authenticate to MQTT.
+  # The bundled broker stays anonymous; set enabled: false and point host at
+  # an existing authenticated broker (typical Home Assistant setups).
+  auth:
+    existingSecret: ""
+    existingSecretUsernameKey: MQTT_USERNAME
+    existingSecretPasswordKey: MQTT_PASSWORD
+  # Persistence is enabled in mosquitto.conf (persistence_location /mosquitto/data).
   persistence:
     existingClaim: ""
     size: 1Gi
     storageClass: ""
+  extraEnv: []
+  extraEnvFrom: []
+  podAnnotations: {}
+  # Chart command replaces the image entrypoint (which would chown /mosquitto).
+  # Mosquitto then drops to uid 1883; fsGroup makes a root:root 0755 PVC writable.
+  podSecurityContext:
+    runAsUser: 1883
+    runAsGroup: 1883
+    fsGroup: 1883
+  securityContext: {}
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  imagePullSecrets: []
   resources:
     requests:
       cpu: 100m
@@ -172,6 +241,15 @@ teslamateApi:
     commandsValet: "false"
     commandsWake: "false"
     commandsWindows: "false"
+  extraEnv: []
+  extraEnvFrom: []
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext: {}
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  imagePullSecrets: []
   resources:
     requests:
       cpu: 50m

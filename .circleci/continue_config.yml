@@ -119,6 +119,7 @@ jobs:
             helm template teslamate . --namespace teslamate > /tmp/rendered-default.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-default.yaml) objects with default values"
             grep -A1 'name: PGDATA' /tmp/rendered-default.yaml | grep -q 'value: "\?/var/lib/postgresql/data'
+            grep -q 'fsGroup: 1883' /tmp/rendered-default.yaml
       - run:
           name: helm template (postgres 18 existingClaim Deployment)
           command: |
@@ -142,6 +143,74 @@ jobs:
               --set teslamateApi.existingSecret=teslamate-api-secret \
               > /tmp/rendered-api-enabled.yaml
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-api-enabled.yaml) objects with teslamateApi enabled"
+      - run:
+          name: helm template (external postgres and mqtt)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set database.enabled=false \
+              --set database.host=cnpg-rw.postgres.svc.cluster.local \
+              --set mosquitto.enabled=false \
+              --set mosquitto.host=mosquitto.home-assistant.svc.cluster.local \
+              --set mosquitto.auth.existingSecret=mqtt-secret \
+              --set teslamate.existingSecret=tm \
+              --set grafana.existingSecret=gf \
+              > /tmp/rendered-external.yaml
+            grep -q 'cnpg-rw.postgres.svc.cluster.local' /tmp/rendered-external.yaml
+            grep -q 'MQTT_USERNAME' /tmp/rendered-external.yaml
+            if grep -q '^kind: StatefulSet$' /tmp/rendered-external.yaml; then
+              echo "bundled database should be omitted" >&2
+              exit 1
+            fi
+            if grep -q 'name: mosquitto$' /tmp/rendered-external.yaml; then
+              echo "bundled mosquitto should be omitted" >&2
+              exit 1
+            fi
+            if helm template teslamate . --namespace teslamate --set database.enabled=false >/tmp/should-fail.yaml; then
+              echo "expected fail when database.enabled is false without host" >&2
+              exit 1
+            fi
+      - run:
+          name: helm template (extraEnv / extraEnvFrom on every component)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set teslamate.existingSecret=teslamate-secret \
+              --set 'teslamate.extraEnv[0].name=TM_EXTRA' \
+              --set 'teslamate.extraEnv[0].value=teslamate' \
+              --set 'teslamate.extraEnvFrom[0].secretRef.name=tm-extra' \
+              --set 'grafana.extraEnv[0].name=GF_EXTRA' \
+              --set 'grafana.extraEnv[0].value=grafana' \
+              --set 'database.extraEnv[0].name=DB_EXTRA' \
+              --set 'database.extraEnv[0].value=database' \
+              --set 'mosquitto.extraEnv[0].name=MQ_EXTRA' \
+              --set 'mosquitto.extraEnv[0].value=mosquitto' \
+              --set teslamateApi.enabled=true \
+              --set teslamateApi.existingSecret=teslamate-api-secret \
+              --set 'teslamateApi.extraEnv[0].name=API_EXTRA' \
+              --set 'teslamateApi.extraEnv[0].value=teslamateapi' \
+              --set 'teslamateApi.extraEnvFrom[0].secretRef.name=api-extra' \
+              > /tmp/rendered-extra-env.yaml
+            for v in TM_EXTRA GF_EXTRA DB_EXTRA MQ_EXTRA API_EXTRA; do
+              grep -q "name: ${v}" /tmp/rendered-extra-env.yaml \
+                || { echo "missing extraEnv var ${v}" >&2; exit 1; }
+            done
+            grep -q 'name: teslamateapi-config' /tmp/rendered-extra-env.yaml
+            grep -q 'name: api-extra' /tmp/rendered-extra-env.yaml
+            envfrom_count="$(
+              awk '
+                /^---/ { if (in_api) exit }
+                $0 == "kind: Deployment" { want=1; next }
+                want && $0 ~ /name: teslamateapi$/ { in_api=1 }
+                in_api && $0 ~ /^          envFrom:/ { count++ }
+                END { print count+0 }
+              ' /tmp/rendered-extra-env.yaml
+            )"
+            if [[ "${envfrom_count}" != "1" ]]; then
+              echo "teslamateapi must have a single envFrom list (got ${envfrom_count})" >&2
+              exit 1
+            fi
+            echo "Rendered $(grep -c '^kind:' /tmp/rendered-extra-env.yaml) objects with extraEnv set"
 
   publish-chart:
     executor: default
