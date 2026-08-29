@@ -43,10 +43,10 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. |
+| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. |
 | `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. Use `extraEnv` / `extraEnvFrom` for any TeslaMate env not first-class in the chart (`MQTT_NAMESPACE`, `DATABASE_SSL`, `TZ`, Home Assistant discovery, …). |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. Set `fixPermissions: false` and `podSecurityContext.fsGroup: 472` for Pod Security `restricted`. Behind TLS ingress, set `config.rootUrl` to `https://%(domain)s/grafana`. |
-| `mosquitto` | Bundled MQTT broker (anonymous). Set `enabled: false` and `host` to use an existing broker. `auth.existingSecret` injects `MQTT_USERNAME` / `MQTT_PASSWORD` into TeslaMate (and TeslaMate API). |
+| `mosquitto` | Bundled MQTT broker (anonymous). Set `enabled: false` and `host` to use an existing broker. `auth.existingSecret` injects `MQTT_USERNAME` / `MQTT_PASSWORD` into TeslaMate (and TeslaMate API). Default `podSecurityContext` runs as uid/gid 1883 with `fsGroup: 1883` so persistence can write after the process drops privileges. |
 | `teslamateApi` | Set `enabled: true` to deploy TeslaMate API. Reuses `teslamate.existingSecret` for `ENCRYPTION_KEY` and `DATABASE_PASS` unless `teslamateApi.existingSecret` is set. |
 
 Every component also accepts `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, `securityContext`, `extraEnv`, and `extraEnvFrom`.
@@ -75,6 +75,14 @@ mosquitto:
 The bundled Mosquitto listener remains `allow_anonymous true`. Point TeslaMate at an external authenticated broker rather than turning auth on for the in-chart broker.
 
 Grafana `NOTES.txt` and port-forwards use `/grafana` when `serveFromSubPath` is true (the default).
+
+### Postgres 18+ (`database.image.tag`)
+
+Official `postgres:18` images moved `PGDATA` to `/var/lib/postgresql/18/docker` and declare `/var/lib/postgresql` as the volume. Because this chart mounts the PVC at `/var/lib/postgresql/data`, an unset `PGDATA` makes the image refuse to start on 18+ — it detects a mount at `/var/lib/postgresql/data` that isn't the data directory and exits 1 rather than risk splitting a cluster across mount points.
+
+The chart therefore sets `PGDATA` to `database.pgData` (default `/var/lib/postgresql/data`), matching the PVC mount. That keeps existing 15/16/17 volumes working untouched and lets a fresh 18 cluster live on the PVC. Note this deliberately differs from the layout docker-library suggests for 18+ (a single mount at `/var/lib/postgresql`), which would require migrating every existing volume; the trade-off is that a future in-place major upgrade can't use `pg_upgrade --link` across the mount boundary.
+
+Do not point `database.image.tag` at 18 on a volume that already has a 17 cluster and expect an in-place major upgrade; dump/restore or `pg_upgrade` as usual.
 
 ## Migration from Docker or existing K8s manifests
 

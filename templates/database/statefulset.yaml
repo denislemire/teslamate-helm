@@ -41,6 +41,8 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.database.existingSecret | quote }}
                   key: {{ .Values.database.existingSecretDatabaseKey | quote }}
+            - name: PGDATA
+              value: {{ .Values.database.pgData | quote }}
             {{- with .Values.database.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -65,7 +67,7 @@ spec:
             timeoutSeconds: 3
           volumeMounts:
             - name: {{ .Values.database.persistence.volumeClaimTemplateName | default "db-storage" }}
-              mountPath: /var/lib/postgresql/data
+              mountPath: {{ .Values.database.pgData }}
               subPath: data
           resources:
             {{- toYaml .Values.database.resources | nindent 12 }}

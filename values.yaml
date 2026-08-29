@@ -17,6 +17,11 @@ database:
     repository: postgres
     tag: "17"
     pullPolicy: IfNotPresent
+  # PGDATA and the PVC mountPath (kept in lockstep in the templates).
+  # Official postgres:18+ would otherwise refuse to start: the image defaults
+  # PGDATA to /var/lib/postgresql/18/docker and guards an unused mount at
+  # /var/lib/postgresql/data. Existing PVCs store the cluster in subPath data.
+  pgData: /var/lib/postgresql/data
   # When set, use a Deployment with this PVC (keeps existing data when migrating).
   # When empty, use StatefulSet with new PVC from volumeClaimTemplate.
   persistence:
@@ -159,7 +164,12 @@ mosquitto:
   extraEnv: []
   extraEnvFrom: []
   podAnnotations: {}
-  podSecurityContext: {}
+  # Chart command replaces the image entrypoint (which would chown /mosquitto).
+  # Mosquitto then drops to uid 1883; fsGroup makes a root:root 0755 PVC writable.
+  podSecurityContext:
+    runAsUser: 1883
+    runAsGroup: 1883
+    fsGroup: 1883
   securityContext: {}
   nodeSelector: {}
   affinity: {}
