@@ -233,11 +233,15 @@ jobs:
             printf '%s' "${ZOT_PASS}" \
               | helm registry login "${ZOT_REGISTRY}" --username admin --password-stdin
             CHART_VERSION="$(grep '^version:' Chart.yaml | awk '{print $2}')"
-            mkdir -p /tmp/charts
-            helm package . --destination /tmp/charts/
-            helm push "/tmp/charts/teslamate-${CHART_VERSION}.tgz" \
-              "oci://${ZOT_REGISTRY}"
-            echo "Pushed: oci://${ZOT_REGISTRY}/teslamate:${CHART_VERSION}"
+            if helm show chart "oci://${ZOT_REGISTRY}/teslamate" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+              echo "oci://${ZOT_REGISTRY}/teslamate:${CHART_VERSION} already exists; skipping push."
+            else
+              mkdir -p /tmp/charts
+              helm package . --destination /tmp/charts/
+              helm push "/tmp/charts/teslamate-${CHART_VERSION}.tgz" \
+                "oci://${ZOT_REGISTRY}"
+              echo "Pushed: oci://${ZOT_REGISTRY}/teslamate:${CHART_VERSION}"
+            fi
 
   publish-github-release:
     executor: default
@@ -310,7 +314,16 @@ jobs:
 
             kubectl -n teslamate rollout status deployment/teslamate --timeout=15m
             kubectl -n teslamate rollout status deployment/teslamate-grafana --timeout=15m
-            kubectl -n teslamate rollout status statefulset/teslamate-db --timeout=15m
+
+            # Bundled Postgres is a StatefulSet unless persistence.existingClaim
+            # is set (EhWS: teslamate-db-pg18 → Deployment). Skip when disabled.
+            if kubectl -n teslamate get statefulset teslamate-db >/dev/null 2>&1; then
+              kubectl -n teslamate rollout status statefulset/teslamate-db --timeout=15m
+            elif kubectl -n teslamate get deployment teslamate-db >/dev/null 2>&1; then
+              kubectl -n teslamate rollout status deployment/teslamate-db --timeout=15m
+            else
+              echo "NOTE: no teslamate-db workload (external Postgres or not deployed)."
+            fi
 
             if kubectl -n teslamate get deployment teslamateapi >/dev/null 2>&1; then
               kubectl -n teslamate rollout status deployment/teslamateapi --timeout=15m
