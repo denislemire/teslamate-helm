@@ -69,6 +69,14 @@ spec:
             {{- with .Values.teslamateApi.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          {{- $sslMode := include "teslamate.databaseSslMode" . | trim }}
+          {{- if or (eq $sslMode "verify-full") .Values.teslamateApi.extraVolumeMounts }}
+          volumeMounts:
+            {{- include "teslamate.postgresCaVolumeMount" . | nindent 12 }}
+            {{- with .Values.teslamateApi.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
           ports:
             - containerPort: 8080
               name: http
@@ -88,4 +96,12 @@ spec:
             timeoutSeconds: 3
           resources:
             {{- toYaml .Values.teslamateApi.resources | nindent 12 }}
+      {{- $sslMode := include "teslamate.databaseSslMode" . | trim }}
+      {{- if or (eq $sslMode "verify-full") .Values.teslamateApi.extraVolumes }}
+      volumes:
+        {{- include "teslamate.postgresCaVolume" . | nindent 8 }}
+        {{- with .Values.teslamateApi.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
 {{- end }}

@@ -27,6 +27,10 @@ mosquitto:
 #   enabled: false
 #   host: teslamate-rw.postgres.svc.cluster.local
 #   port: 5432
+#   ssl:
+#     mode: verify-full
+#     ca:
+#       existingSecret: teslamate-pg-ca   # CloudNativePG: <cluster>-ca
 # mosquitto:
 #   enabled: false
 #   host: mosquitto.home-assistant.svc.cluster.local

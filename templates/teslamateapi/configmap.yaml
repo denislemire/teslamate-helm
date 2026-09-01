@@ -1,4 +1,5 @@
 {{- if .Values.teslamateApi.enabled }}
+{{- $sslMode := include "teslamate.databaseSslMode" . | trim }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,7 +13,10 @@ data:
   DATABASE_PORT: {{ default (include "teslamate.databasePort" .) .Values.teslamateApi.config.databasePort | quote }}
   DATABASE_NAME: {{ .Values.teslamateApi.config.databaseName | quote }}
   DATABASE_USER: {{ .Values.teslamateApi.config.databaseUser | quote }}
-  DATABASE_SSL: {{ .Values.teslamateApi.config.databaseSsl | quote }}
+  DATABASE_SSL: {{ if ne $sslMode "disable" }}{{ include "teslamate.apiDatabaseSsl" . | quote }}{{ else }}{{ .Values.teslamateApi.config.databaseSsl | quote }}{{ end }}
+  {{- if eq $sslMode "verify-full" }}
+  DATABASE_SSL_CA_CERT_FILE: {{ include "teslamate.postgresCaFile" . | quote }}
+  {{- end }}
   DATABASE_TIMEOUT: {{ .Values.teslamateApi.config.databaseTimeout | quote }}
   MQTT_HOST: {{ default (include "teslamate.mosquittoHost" .) .Values.teslamateApi.config.mqttHost | quote }}
   MQTT_PORT: {{ default (include "teslamate.mosquittoPort" .) .Values.teslamateApi.config.mqttPort | quote }}
