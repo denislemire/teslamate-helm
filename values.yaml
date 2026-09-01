@@ -12,6 +12,17 @@ database:
   # Used when enabled is false, or to override the in-chart Service DNS name.
   host: ""
   port: 5432
+  # Client TLS for TeslaMate, Grafana, and TeslaMate API.
+  # disable: no TLS (bundled Postgres has none).
+  # require: encrypt, do not verify (TeslaMate DATABASE_SSL=noverify).
+  # verify-full: encrypt and verify. Requires ca.existingSecret.
+  #   CloudNativePG: Secret <cluster>-ca, key ca.crt (e.g. teslamate-pg-ca).
+  ssl:
+    mode: disable
+    ca:
+      existingSecret: ""
+      secretKey: ca.crt
+      mountPath: /etc/ssl/certs/postgres-ca.crt
   image:
     registry: ""
     repository: postgres
@@ -74,6 +85,8 @@ teslamate:
     existingClaim: ""
   extraEnv: []
   extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
   podAnnotations: {}
   podSecurityContext: {}
   securityContext: {}
@@ -122,6 +135,8 @@ grafana:
     pullPolicy: IfNotPresent
   extraEnv: []
   extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
   podAnnotations: {}
   podSecurityContext: {}
   securityContext: {}
@@ -205,6 +220,7 @@ teslamateApi:
     databasePort: "5432"
     databaseName: "teslamate"
     databaseUser: "teslamate"
+    # sslmode for TeslaMate API. Overridden when database.ssl.mode is not disable.
     databaseSsl: "disable"
     databaseTimeout: "60000"
     mqttHost: ""
@@ -243,6 +259,8 @@ teslamateApi:
     commandsWindows: "false"
   extraEnv: []
   extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
   podAnnotations: {}
   podSecurityContext: {}
   securityContext: {}

@@ -43,13 +43,13 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. |
-| `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. Use `extraEnv` / `extraEnvFrom` for any TeslaMate env not first-class in the chart (`MQTT_NAMESPACE`, `DATABASE_SSL`, `TZ`, Home Assistant discovery, …). |
+| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. `database.ssl` configures client TLS for TeslaMate, Grafana, and TeslaMate API (see below). |
+| `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. Use `extraEnv` / `extraEnvFrom` for any TeslaMate env not first-class in the chart (`MQTT_NAMESPACE`, `TZ`, Home Assistant discovery, …). Postgres TLS is `database.ssl`, not `DATABASE_SSL` in `extraEnv`. |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. Set `fixPermissions: false` and `podSecurityContext.fsGroup: 472` for Pod Security `restricted`. Behind TLS ingress, set `config.rootUrl` to `https://%(domain)s/grafana`. |
 | `mosquitto` | Bundled MQTT broker (anonymous). Set `enabled: false` and `host` to use an existing broker. `auth.existingSecret` injects `MQTT_USERNAME` / `MQTT_PASSWORD` into TeslaMate (and TeslaMate API). Default `podSecurityContext` runs as uid/gid 1883 with `fsGroup: 1883` so persistence can write after the process drops privileges. |
 | `teslamateApi` | Set `enabled: true` to deploy TeslaMate API. Reuses `teslamate.existingSecret` for `ENCRYPTION_KEY` and `DATABASE_PASS` unless `teslamateApi.existingSecret` is set. |
 
-Every component also accepts `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, `securityContext`, `extraEnv`, and `extraEnvFrom`.
+Every component also accepts `nodeSelector`, `tolerations`, `affinity`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, `securityContext`, `extraEnv`, and `extraEnvFrom`. TeslaMate, Grafana, and TeslaMate API also accept `extraVolumes` / `extraVolumeMounts`.
 
 ### Existing Postgres or MQTT
 
@@ -73,6 +73,33 @@ mosquitto:
 `database.host` / `mosquitto.host` are required when the matching `enabled` flag is false.
 
 The bundled Mosquitto listener remains `allow_anonymous true`. Point TeslaMate at an external authenticated broker rather than turning auth on for the in-chart broker.
+
+### Postgres TLS (CloudNativePG, RDS, …)
+
+TeslaMate 4.2.0 **raises on boot** if `DATABASE_SSL=true` without `DATABASE_SSL_CA_CERT_FILE`. Do not set those via `extraEnv` alone — the chart must also mount the CA.
+
+| `database.ssl.mode` | TeslaMate | TeslaMate API | Grafana (`DATABASE_SSL_MODE`) |
+|---------------------|-----------|---------------|-------------------------------|
+| `disable` (default) | off | `teslamateApi.config.databaseSsl` (default `disable`) | `disable` |
+| `require` | `DATABASE_SSL=noverify` | `require` | `require` |
+| `verify-full` | `DATABASE_SSL=true` + CA file | `verify-full` + CA file | `require` (see note) |
+
+`verify-full` requires `database.ssl.ca.existingSecret`. CloudNativePG names that Secret `<cluster>-ca` with key `ca.crt`.
+
+```yaml
+database:
+  enabled: false
+  host: teslamate-pg-rw.teslamate.svc.cluster.local
+  ssl:
+    mode: verify-full
+    ca:
+      existingSecret: teslamate-pg-ca
+      secretKey: ca.crt
+```
+
+The TeslaMate Grafana image interpolates `sslmode: $DATABASE_SSL_MODE` only; it has no `sslRootCertFile` in `datasource.yml`. The chart still **mounts** the CA at `database.ssl.ca.mountPath` on the Grafana pod (same path as TeslaMate) so a custom datasource overlay can verify, but stock Grafana encrypts without verifying (`require`) even when TeslaMate uses `verify-full`.
+
+The bundled in-chart Postgres does not serve TLS. Leave `database.ssl.mode: disable` unless you are pointing at an external cluster.
 
 Grafana `NOTES.txt` and port-forwards use `/grafana` when `serveFromSubPath` is true (the default).
 

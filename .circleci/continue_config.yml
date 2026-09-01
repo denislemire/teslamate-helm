@@ -211,6 +211,57 @@ jobs:
               exit 1
             fi
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-extra-env.yaml) objects with extraEnv set"
+      - run:
+          name: helm template (database.ssl require, verify-full, extraVolumes)
+          command: |
+            set -euo pipefail
+            helm template teslamate . --namespace teslamate \
+              --set teslamate.existingSecret=tm \
+              --set grafana.existingSecret=gf \
+              --set database.ssl.mode=require \
+              > /tmp/rendered-ssl-require.yaml
+            grep -q 'value: "noverify"' /tmp/rendered-ssl-require.yaml
+            grep -q 'name: DATABASE_SSL_MODE' /tmp/rendered-ssl-require.yaml
+            grep -A1 'name: DATABASE_SSL_MODE' /tmp/rendered-ssl-require.yaml | grep -q 'value: "require"'
+            if grep -q 'name: postgres-ca' /tmp/rendered-ssl-require.yaml; then
+              echo "require mode must not mount a CA secret" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set teslamate.existingSecret=tm \
+              --set grafana.existingSecret=gf \
+              --set teslamateApi.enabled=true \
+              --set teslamateApi.existingSecret=tm \
+              --set database.enabled=false \
+              --set database.host=teslamate-pg-rw.teslamate.svc.cluster.local \
+              --set database.ssl.mode=verify-full \
+              --set database.ssl.ca.existingSecret=teslamate-pg-ca \
+              --set teslamate.extraVolumes[0].name=extra-vol \
+              --set teslamate.extraVolumes[0].configMap.name=dummy \
+              --set teslamate.extraVolumeMounts[0].name=extra-vol \
+              --set teslamate.extraVolumeMounts[0].mountPath=/extra \
+              > /tmp/rendered-ssl-verify.yaml
+            grep -q 'secretName: "teslamate-pg-ca"' /tmp/rendered-ssl-verify.yaml
+            grep -q 'name: DATABASE_SSL_CA_CERT_FILE' /tmp/rendered-ssl-verify.yaml
+            grep -q '/etc/ssl/certs/postgres-ca.crt' /tmp/rendered-ssl-verify.yaml
+            grep -q 'DATABASE_SSL: "verify-full"' /tmp/rendered-ssl-verify.yaml
+            grep -q 'name: extra-vol' /tmp/rendered-ssl-verify.yaml
+            grep -A1 'name: DATABASE_SSL_MODE' /tmp/rendered-ssl-verify.yaml | grep -q 'value: "require"'
+            grep -A1 'name: DATABASE_SSL$' /tmp/rendered-ssl-verify.yaml | grep -q 'value: "true"'
+
+            if helm template teslamate . --namespace teslamate \
+              --set database.ssl.mode=verify-full \
+              >/tmp/should-fail-ssl-ca.yaml; then
+              echo "expected fail when verify-full has no ca.existingSecret" >&2
+              exit 1
+            fi
+            if helm template teslamate . --namespace teslamate \
+              --set database.ssl.mode=verify-peer \
+              >/tmp/should-fail-ssl-mode.yaml; then
+              echo "expected fail for unknown database.ssl.mode" >&2
+              exit 1
+            fi
 
   publish-chart:
     executor: default
