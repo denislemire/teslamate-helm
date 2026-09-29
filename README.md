@@ -76,7 +76,7 @@ The bundled Mosquitto listener remains `allow_anonymous true`. Point TeslaMate a
 
 ### Postgres TLS (CloudNativePG, RDS, …)
 
-TeslaMate 4.2.0 **raises on boot** if `DATABASE_SSL=true` without `DATABASE_SSL_CA_CERT_FILE`. Do not set those via `extraEnv` alone — the chart must also mount the CA.
+TeslaMate 4.2.0 and later **raises on boot** if `DATABASE_SSL=true` without `DATABASE_SSL_CA_CERT_FILE`. Do not set those via `extraEnv` alone — the chart must also mount the CA.
 
 | `database.ssl.mode` | TeslaMate | TeslaMate API | Grafana (`DATABASE_SSL_MODE`) |
 |---------------------|-----------|---------------|-------------------------------|
