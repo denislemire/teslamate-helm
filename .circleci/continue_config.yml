@@ -120,6 +120,21 @@ jobs:
             echo "Rendered $(grep -c '^kind:' /tmp/rendered-default.yaml) objects with default values"
             grep -A1 'name: PGDATA' /tmp/rendered-default.yaml | grep -q 'value: "\?/var/lib/postgresql/data'
             grep -q 'fsGroup: 1883' /tmp/rendered-default.yaml
+            # Preflight is on by default. The repair Job stays off until enabled.
+            grep -q '^  name: teslamate-db-ownership-preflight$' /tmp/rendered-default.yaml
+            grep -q 'helm.sh/hook": "pre-upgrade"' /tmp/rendered-default.yaml
+            if grep -q 'pre-install,pre-upgrade' /tmp/rendered-default.yaml; then
+              echo "bundled Postgres must not register a pre-install preflight hook" >&2
+              exit 1
+            fi
+            if grep -q '^  name: teslamate-db-ownership$' /tmp/rendered-default.yaml; then
+              echo "ownership repair hook must stay off unless database.ownership.enabled is true" >&2
+              exit 1
+            fi
+            grep -q 'key: "TM_DB_USER"' /tmp/rendered-default.yaml
+            grep -q 'key: "TM_DB_PASS"' /tmp/rendered-default.yaml
+            grep -q 'key: "TM_DB_NAME"' /tmp/rendered-default.yaml
+            grep -q 'f /tmp/ownership-preflight.psql' /tmp/rendered-default.yaml
       - run:
           name: helm template (postgres 18 existingClaim Deployment)
           command: |
@@ -262,6 +277,178 @@ jobs:
               echo "expected fail for unknown database.ssl.mode" >&2
               exit 1
             fi
+      - run:
+          name: helm template (database.ownership hook)
+          command: |
+            set -euo pipefail
+            sed -n '/<!-- BEGIN reassign-ownership.psql -->/,/<!-- END reassign-ownership.psql -->/p' README.md \
+              | sed '1d;$d' \
+              | sed '1d;$d' \
+              > /tmp/readme-ownership.sql
+            diff -u files/reassign-ownership.psql /tmp/readme-ownership.sql
+            echo "README SQL matches files/reassign-ownership.psql"
+
+            if helm template teslamate . --namespace teslamate \
+              --set database.ownership.enabled=true \
+              >/tmp/should-fail-ownership-secret.yaml; then
+              echo "expected fail when ownership is enabled without an admin secret" >&2
+              exit 1
+            fi
+            if helm template teslamate . --namespace teslamate \
+              --set database.ownership.enabled=true \
+              --set database.ownership.existingSecret=teslamate-pg-superuser \
+              >/tmp/should-fail-ownership-app.yaml; then
+              echo "expected fail when ownership is enabled without teslamate.existingSecret" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set database.ownership.enabled=true \
+              --set database.ownership.existingSecret=teslamate-pg-superuser \
+              --set teslamate.existingSecret=tm \
+              --set 'database.tolerations[0].key=storage' \
+              --set 'database.tolerations[0].operator=Exists' \
+              --set 'database.ownership.nodeSelector.kubernetes\.io/os=linux' \
+              > /tmp/rendered-ownership-bundled.yaml
+            grep -q 'kind: Job' /tmp/rendered-ownership-bundled.yaml
+            grep -q '^  name: teslamate-db-ownership$' /tmp/rendered-ownership-bundled.yaml
+            if grep -q 'name: teslamate-db-ownership-preflight' /tmp/rendered-ownership-bundled.yaml; then
+              echo "preflight must not render when database.ownership.enabled is true" >&2
+              exit 1
+            fi
+            grep -q 'helm.sh/hook": "pre-upgrade"' /tmp/rendered-ownership-bundled.yaml
+            if grep -q 'pre-install,pre-upgrade' /tmp/rendered-ownership-bundled.yaml; then
+              echo "bundled Postgres must not register a pre-install ownership hook" >&2
+              exit 1
+            fi
+            grep -q 'name: "teslamate-pg-superuser"' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'name: OWNERSHIP_SQL' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'f /tmp/reassign-ownership.psql' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'name: tmp' /tmp/rendered-ownership-bundled.yaml
+            grep -q "deptype = 'e'" /tmp/rendered-ownership-bundled.yaml
+            grep -q 'ALTER TABLE' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'ALTER SEQUENCE' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'ALTER TYPE' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'ALTER FUNCTION' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'key: storage' /tmp/rendered-ownership-bundled.yaml
+            grep -q 'kubernetes.io/os: linux' /tmp/rendered-ownership-bundled.yaml
+            # The database Service selects app=teslamate-db. The hook pod must not.
+            if awk '
+              $0 == "kind: Job" { in_job=1 }
+              in_job && /app: teslamate-db/ { found=1 }
+              in_job && /^---/ { exit }
+              END { exit !found }
+            ' /tmp/rendered-ownership-bundled.yaml; then
+              echo "ownership Job must not carry the database Service selector" >&2
+              exit 1
+            fi
+            if grep -q 'name: postgres-ca' /tmp/rendered-ownership-bundled.yaml; then
+              echo "ownership hook must not mount a CA when ssl mode is disable" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set database.enabled=false \
+              --set database.host=teslamate-pg-rw.teslamate.svc.cluster.local \
+              --set database.ssl.mode=verify-full \
+              --set database.ssl.ca.existingSecret=teslamate-pg-ca \
+              --set database.ownership.enabled=true \
+              --set database.ownership.existingSecret=teslamate-pg-superuser \
+              --set teslamate.existingSecret=tm \
+              > /tmp/rendered-ownership-tls.yaml
+            grep -q 'helm.sh/hook": "pre-install,pre-upgrade"' /tmp/rendered-ownership-tls.yaml
+            grep -q 'teslamate-pg-rw.teslamate.svc.cluster.local' /tmp/rendered-ownership-tls.yaml
+            grep -q 'name: PGSSLMODE' /tmp/rendered-ownership-tls.yaml
+            grep -A1 'name: PGSSLMODE' /tmp/rendered-ownership-tls.yaml | grep -q 'value: "verify-full"'
+            grep -q 'name: PGSSLROOTCERT' /tmp/rendered-ownership-tls.yaml
+            grep -q '/etc/ssl/certs/postgres-ca.crt' /tmp/rendered-ownership-tls.yaml
+            grep -q 'secretName: "teslamate-pg-ca"' /tmp/rendered-ownership-tls.yaml
+            grep -q 'name: postgres-ca' /tmp/rendered-ownership-tls.yaml
+
+            helm template teslamate . --namespace teslamate \
+              --set database.ownership.enabled=true \
+              --set database.ownership.existingSecret=teslamate-pg-superuser \
+              --set teslamate.existingSecret=tm \
+              --set database.ssl.mode=require \
+              > /tmp/rendered-ownership-require.yaml
+            grep -A1 'name: PGSSLMODE' /tmp/rendered-ownership-require.yaml | grep -q 'value: "require"'
+            if grep -q 'name: postgres-ca' /tmp/rendered-ownership-require.yaml; then
+              echo "ownership require mode must not mount a CA secret" >&2
+              exit 1
+            fi
+            if grep -q 'name: PGSSLROOTCERT' /tmp/rendered-ownership-require.yaml; then
+              echo "ownership require mode must not set PGSSLROOTCERT" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set database.ownership.preflight=false \
+              > /tmp/rendered-preflight-off.yaml
+            if grep -q 'teslamate-db-ownership' /tmp/rendered-preflight-off.yaml; then
+              echo "preflight=false must not render an ownership hook" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set database.enabled=false \
+              --set database.host=teslamate-pg-rw.teslamate.svc.cluster.local \
+              --set database.ssl.mode=verify-full \
+              --set database.ssl.ca.existingSecret=teslamate-pg-ca \
+              --set teslamate.existingSecret=tm \
+              > /tmp/rendered-preflight-tls.yaml
+            grep -q '^  name: teslamate-db-ownership-preflight$' /tmp/rendered-preflight-tls.yaml
+            if grep -q '^  name: teslamate-db-ownership$' /tmp/rendered-preflight-tls.yaml; then
+              echo "external preflight must not render the repair Job" >&2
+              exit 1
+            fi
+            grep -q 'helm.sh/hook": "pre-install,pre-upgrade"' /tmp/rendered-preflight-tls.yaml
+            grep -q 'teslamate-pg-rw.teslamate.svc.cluster.local' /tmp/rendered-preflight-tls.yaml
+            grep -q 'name: PGSSLMODE' /tmp/rendered-preflight-tls.yaml
+            grep -A1 'name: PGSSLMODE' /tmp/rendered-preflight-tls.yaml | grep -q 'value: "verify-full"'
+            grep -q 'name: PGSSLROOTCERT' /tmp/rendered-preflight-tls.yaml
+            grep -q '/etc/ssl/certs/postgres-ca.crt' /tmp/rendered-preflight-tls.yaml
+            grep -q 'secretName: "teslamate-pg-ca"' /tmp/rendered-preflight-tls.yaml
+            grep -q 'name: postgres-ca' /tmp/rendered-preflight-tls.yaml
+            grep -q 'key: "TM_DB_USER"' /tmp/rendered-preflight-tls.yaml
+            grep -q 'key: "TM_DB_PASS"' /tmp/rendered-preflight-tls.yaml
+            grep -q 'key: "TM_DB_NAME"' /tmp/rendered-preflight-tls.yaml
+            grep -q 'name: "tm"' /tmp/rendered-preflight-tls.yaml
+            if grep -q 'teslamate-pg-superuser' /tmp/rendered-preflight-tls.yaml; then
+              echo "preflight must connect as the app role, not the superuser secret" >&2
+              exit 1
+            fi
+            grep -q 'files/reassign-ownership.psql' /tmp/rendered-preflight-tls.yaml
+            grep -q 'database.ownership.enabled: true' /tmp/rendered-preflight-tls.yaml
+            grep -q 'database.ownership.preflight: false' /tmp/rendered-preflight-tls.yaml
+            if awk '
+              $0 == "kind: Job" { in_job=1 }
+              in_job && /app: teslamate-db/ { found=1 }
+              in_job && /^---/ { exit }
+              END { exit !found }
+            ' /tmp/rendered-preflight-tls.yaml; then
+              echo "preflight Job must not carry the database Service selector" >&2
+              exit 1
+            fi
+
+            helm template teslamate . --namespace teslamate \
+              --set teslamate.existingSecret=tm \
+              --set database.ssl.mode=require \
+              > /tmp/rendered-preflight-require.yaml
+            grep -q '^  name: teslamate-db-ownership-preflight$' /tmp/rendered-preflight-require.yaml
+            grep -A1 'name: PGSSLMODE' /tmp/rendered-preflight-require.yaml | grep -q 'value: "require"'
+            if grep -q 'name: postgres-ca' /tmp/rendered-preflight-require.yaml; then
+              echo "preflight require mode must not mount a CA secret" >&2
+              exit 1
+            fi
+            if grep -q 'name: PGSSLROOTCERT' /tmp/rendered-preflight-require.yaml; then
+              echo "preflight require mode must not set PGSSLROOTCERT" >&2
+              exit 1
+            fi
+
+            mkdir -p /tmp/charts
+            helm package . --destination /tmp/charts
+            tar -tzf /tmp/charts/teslamate-0.2.12.tgz | grep -q 'teslamate/files/reassign-ownership.psql'
+            tar -tzf /tmp/charts/teslamate-0.2.12.tgz | grep -q 'teslamate/files/ownership-preflight.psql'
 
   publish-chart:
     executor: default

@@ -1,0 +1,164 @@
+{{/*
+Opt-in pre-upgrade (and, for an external database, pre-install) hook.
+
+TeslaMate 4.4.0 alters existing tables and enums. That requires the app role
+to own them. A superuser restore leaves those objects owned by postgres while
+the database itself is owned by the app role. This Job reassigns them.
+
+The bundled Postgres does not exist yet during pre-install, so the hook is
+pre-upgrade only while database.enabled is true. A fresh bundled cluster
+creates its objects as POSTGRES_USER and does not need the repair.
+*/}}
+{{- if .Values.database.ownership.enabled }}
+{{- $adminSecret := .Values.database.ownership.existingSecret | toString | trim }}
+{{- if eq $adminSecret "" }}
+{{- fail "database.ownership.enabled requires database.ownership.existingSecret (superuser or current owner; CloudNativePG: Secret <cluster>-superuser, keys username and password)" }}
+{{- end }}
+{{- $adminUserKey := .Values.database.ownership.existingSecretUserKey | toString | trim }}
+{{- $adminPassKey := .Values.database.ownership.existingSecretPasswordKey | toString | trim }}
+{{- if or (eq $adminUserKey "") (eq $adminPassKey "") }}
+{{- fail "database.ownership.enabled requires database.ownership.existingSecretUserKey and existingSecretPasswordKey" }}
+{{- end }}
+{{- $appSecret := .Values.teslamate.existingSecret | toString | trim }}
+{{- if eq $appSecret "" }}
+{{- fail "database.ownership.enabled requires teslamate.existingSecret (the Job reads the app role and database name from it)" }}
+{{- end }}
+{{- $appUserKey := .Values.teslamate.existingSecretUserKey | toString | trim }}
+{{- $appDbKey := .Values.teslamate.existingSecretDatabaseKey | toString | trim }}
+{{- if or (eq $appUserKey "") (eq $appDbKey "") }}
+{{- fail "database.ownership.enabled requires teslamate.existingSecretUserKey and teslamate.existingSecretDatabaseKey" }}
+{{- end }}
+{{- $sql := .Files.Get "files/reassign-ownership.psql" }}
+{{- if not (contains "deptype = 'e'" $sql) }}
+{{- fail "files/reassign-ownership.psql is missing from the chart package" }}
+{{- end }}
+{{- include "teslamate.validateDatabaseSsl" . }}
+{{- $hooks := "pre-upgrade" }}
+{{- if not .Values.database.enabled }}
+{{- $hooks = "pre-install,pre-upgrade" }}
+{{- end }}
+{{- $own := .Values.database.ownership }}
+{{- $db := .Values.database }}
+{{- $sched := dict
+  "nodeSelector" (default $db.nodeSelector $own.nodeSelector)
+  "affinity" (default $db.affinity $own.affinity)
+  "tolerations" (default $db.tolerations $own.tolerations)
+  "podAnnotations" (default $db.podAnnotations $own.podAnnotations)
+  "podSecurityContext" (default $db.podSecurityContext $own.podSecurityContext)
+  "securityContext" (default $db.securityContext $own.securityContext)
+}}
+{{- $pull := $own.imagePullSecrets }}
+{{- if not $pull }}
+{{- $pull = $db.imagePullSecrets }}
+{{- end }}
+{{- if $pull }}
+{{- $_ := set $sched "imagePullSecrets" $pull }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: teslamate-db-ownership
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: database-ownership
+    {{- include "teslamate.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hooks | quote }}
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: database-ownership
+        {{- include "teslamate.selectorLabels" . | nindent 8 }}
+      {{- include "teslamate.podAnnotations" $sched | nindent 6 }}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      {{- include "teslamate.podPlacement" (dict "component" $sched "root" .) | nindent 6 }}
+      {{- include "teslamate.podSecurityContext" $sched | nindent 6 }}
+      containers:
+        - name: ownership
+          image: "{{ .Values.database.image.registry }}{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+          imagePullPolicy: {{ .Values.database.image.pullPolicy }}
+          {{- include "teslamate.containerSecurityContext" $sched | nindent 10 }}
+          command: ["sh", "-eu", "-c"]
+          args:
+            - |
+              ready=0
+              i=0
+              while [ "$i" -lt 30 ]; do
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER"; then
+                  ready=1
+                  break
+                fi
+                echo "waiting for postgres at ${PGHOST}:${PGPORT} database ${PGDATABASE}..."
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$ready" != 1 ]; then
+                echo "postgres did not become ready; ownership was not changed" >&2
+                exit 1
+              fi
+              echo "reassigning public/private objects to ${TESLAMATE_DB_USER}"
+              # psql -c does not interpolate :'variables'. -f does, including inside DO blocks.
+              printf '%s\n' "$OWNERSHIP_SQL" > /tmp/reassign-ownership.psql
+              psql --no-password -v ON_ERROR_STOP=1 -v app_user="$TESLAMATE_DB_USER" -f /tmp/reassign-ownership.psql
+          env:
+            - name: PGHOST
+              value: {{ include "teslamate.databaseHost" . | quote }}
+            - name: PGPORT
+              value: {{ include "teslamate.databasePort" . | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret | quote }}
+                  key: {{ $adminUserKey | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret | quote }}
+                  key: {{ $adminPassKey | quote }}
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $appSecret | quote }}
+                  key: {{ $appDbKey | quote }}
+            - name: TESLAMATE_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $appSecret | quote }}
+                  key: {{ $appUserKey | quote }}
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: PGAPPNAME
+              value: teslamate-db-ownership
+            - name: PGSSLMODE
+              value: {{ include "teslamate.databaseSslMode" . | quote }}
+            {{- if eq (include "teslamate.databaseSslMode" . | trim) "verify-full" }}
+            - name: PGSSLROOTCERT
+              value: {{ include "teslamate.postgresCaFile" . | quote }}
+            {{- end }}
+            - name: OWNERSHIP_SQL
+              value: |
+{{ $sql | indent 16 }}
+          {{- $caMount := include "teslamate.postgresCaVolumeMount" . | trim }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $caMount }}
+            {{- $caMount | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.database.ownership.resources | nindent 12 }}
+      {{- $caVolume := include "teslamate.postgresCaVolume" . | trim }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $caVolume }}
+        {{- $caVolume | nindent 8 }}
+        {{- end }}
+{{- end }}

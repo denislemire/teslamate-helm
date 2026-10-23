@@ -43,7 +43,7 @@ A [Helm](https://helm.sh) chart for [TeslaMate](https://github.com/teslamate-org
 
 | Section | Description |
 |--------|-------------|
-| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. `database.ssl` configures client TLS for TeslaMate, Grafana, and TeslaMate API (see below). |
+| `database` | Bundled Postgres. Set `enabled: false` and `host` (optional `port`) to use an existing database. `persistence.existingClaim` attaches the bundled instance to an existing PVC. `database.pgData` is both `PGDATA` and the PVC `mountPath` (default `/var/lib/postgresql/data`); required for `postgres:18+`. `database.ssl` configures client TLS for TeslaMate, Grafana, and TeslaMate API (see below). `database.ownership.preflight` (default `true`) fails the upgrade before rollout when restored objects are not owned by the app role. `database.ownership.enabled` is the opt-in repair hook for that case (see below). |
 | `teslamate` | TeslaMate app image, config (virtualHost, timezone), existingSecret, resources. Use `extraEnv` / `extraEnvFrom` for any TeslaMate env not first-class in the chart (`MQTT_NAMESPACE`, `TZ`, Home Assistant discovery, …). Postgres TLS is `database.ssl`, not `DATABASE_SSL` in `extraEnv`. |
 | `grafana` | Grafana image, persistence, domain/root URL, existingSecret, resources. Set `fixPermissions: false` and `podSecurityContext.fsGroup: 472` for Pod Security `restricted`. Behind TLS ingress, set `config.rootUrl` to `https://%(domain)s/grafana`. |
 | `mosquitto` | Bundled MQTT broker (anonymous). Set `enabled: false` and `host` to use an existing broker. `auth.existingSecret` injects `MQTT_USERNAME` / `MQTT_PASSWORD` into TeslaMate (and TeslaMate API). Default `podSecurityContext` runs as uid/gid 1883 with `fsGroup: 1883` so persistence can write after the process drops privileges. |
@@ -110,6 +110,257 @@ Official `postgres:18` images moved `PGDATA` to `/var/lib/postgresql/18/docker` 
 The chart therefore sets `PGDATA` to `database.pgData` (default `/var/lib/postgresql/data`), matching the PVC mount. That keeps existing 15/16/17 volumes working untouched and lets a fresh 18 cluster live on the PVC. Note this deliberately differs from the layout docker-library suggests for 18+ (a single mount at `/var/lib/postgresql`), which would require migrating every existing volume; the trade-off is that a future in-place major upgrade can't use `pg_upgrade --link` across the mount boundary.
 
 Do not point `database.image.tag` at 18 on a volume that already has a 17 cluster and expect an in-place major upgrade; dump/restore or `pg_upgrade` as usual.
+
+## Upgrading to TeslaMate 4.4.0
+
+Chart 0.2.11 and later run TeslaMate 4.4.0. On startup that version applies two migrations that change objects created by earlier versions:
+
+- `20261009120000` `AlignImportRunsCarIdType` alters `import_runs.car_id` from `bigint` to `smallint`
+- `20261014120000` `RenameRangeEnumToPreferredRange` runs `ALTER TYPE range RENAME TO preferred_range`
+
+PostgreSQL requires the connecting role to own the table or type. Chart 0.2.11 rolled the new pod first. That pod crash-loops with:
+
+```text
+** (Postgrex.Error) ERROR 42501 (insufficient_privilege) must be owner of table import_runs
+```
+
+when the database is owned by the app role (`teslamate`) and the tables, sequences, enum types, or functions are owned by someone else, usually `postgres`. A restore or import done as a superuser does that: `pg_dump` / `psql` as `postgres`, or a CloudNativePG import, leaves every restored object owned by `postgres`. The app role can still read and write, which is why TeslaMate kept running. The 4.4.0 migration is the one that has to `ALTER` those restored objects.
+
+If that migration does run and fails, it rolls back, so the database stays on the previous schema version. During a rolling update the previous ReplicaSet keeps serving until the new pod is ready.
+
+A database this chart's bundled Postgres created on first boot, or a CloudNativePG database created as the app role and never restored as a superuser, already has the right owners. Leave `database.ownership.enabled` at `false`. The preflight below then exits 0 and the upgrade continues.
+
+### Preflight — fail the upgrade before the pod rolls
+
+Chart 0.2.12 runs `job/teslamate-db-ownership-preflight` before it updates the TeslaMate Deployment. The check is on by default (`database.ownership.preflight: true`). It connects as the app role, using `teslamate.existingSecret` (`TM_DB_USER`, `TM_DB_PASS`, and `TM_DB_NAME` by default) and the same `database.host`, `database.port`, and `database.ssl` settings as TeslaMate.
+
+It looks through schemas `public` and `private` for tables (including partitioned and foreign tables), views, materialized views, sequences that are not owned by a column, enum types, and functions that this role does not own. Extension members such as `cube`, `earthdistance`, and `ll_to_earth` are ignored, matching `files/reassign-ownership.psql`.
+
+When ownership is already right, the Job prints nothing and exits 0. Helm continues the upgrade, and a successful Job is deleted.
+
+When any of those objects belong to someone else, the Job fails and Helm aborts the upgrade. The Deployment is not rolled, so the previous pod keeps serving. The log names up to five objects and both fixes:
+
+```bash
+kubectl logs job/teslamate-db-ownership-preflight
+```
+
+Fix it with Option A or Option B below, then upgrade again.
+
+The hook is `pre-upgrade` while the bundled Postgres is enabled, so the first install of that database does not wait for a server that does not exist yet. With an external database (`database.enabled: false`) the hook also runs `pre-install`.
+
+Set `database.ownership.preflight: false` to skip the check. The upgrade then rolls TeslaMate immediately, and a database with the wrong owners crash-loops the new pod the way chart 0.2.11 did. Setting `database.ownership.enabled: true` also skips the preflight; the repair Job runs instead.
+
+Empty `database.ownership` scheduling fields inherit `database.nodeSelector`, `affinity`, `tolerations`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, and `securityContext`, the same way they do for the repair hook.
+
+### Option A — let the chart repair ownership
+
+Turn the hook on when Postgres is already accepting connections and you can give the chart a superuser password. CloudNativePG's `<cluster>-superuser` secret is the usual choice. A non-superuser works only when it already owns the objects and is a member of the app role (PostgreSQL requires that membership to transfer ownership). It is a Helm `pre-upgrade` Job. With an external database (`database.enabled: false`) it also runs `pre-install`, so a first install against a restored CloudNativePG cluster is covered.
+
+The Job uses `database.host`, `database.port`, and `database.ssl` the same way TeslaMate does (`disable`, `require`, or `verify-full` with the CA secret mounted). It reads the admin user and password from `database.ownership.existingSecret`, and the app role and database name from `teslamate.existingSecret` (`existingSecretUserKey` / `existingSecretDatabaseKey`, `TM_DB_USER` and `TM_DB_NAME` by default).
+
+It reassigns, in schemas `public` and `private`, objects that role does not already own:
+
+- tables, including partitioned and foreign tables, plus views and materialized views
+- sequences that are not owned by a column (indexes, toast tables, and column-owned sequences follow the table)
+- enum types (`billing_type`, `range`, `states_status`, `unit_of_length`, `unit_of_pressure`, `unit_of_temperature`, and the same enums under later names)
+- functions TeslaMate created (`convert_km`, `convert_celsius`, `convert_m`)
+
+Extension members stay as they are. That includes `cube` and `earthdistance` and functions such as `ll_to_earth`. The owner changes are one transaction, and running the script again changes nothing.
+
+```yaml
+database:
+  enabled: false
+  host: teslamate-pg-rw.teslamate.svc.cluster.local
+  ssl:
+    mode: verify-full
+    ca:
+      existingSecret: teslamate-pg-ca   # CloudNativePG: <cluster>-ca, key ca.crt
+  ownership:
+    enabled: true
+    # CloudNativePG Secret <cluster>-superuser. Default keys are username and password.
+    existingSecret: teslamate-pg-superuser
+
+teslamate:
+  existingSecret: teslamate-secrets
+```
+
+The hook image is `database.image`, which supplies `psql`. When `database.enabled` is false that image is only a client. Point `database.image` at a Postgres image you can pull if `postgres:17` is not available in the cluster.
+
+Enable this on a database that is already up. The first install of the bundled Postgres is the case to leave it off: a pre-install hook would run before that database exists, and the install would fail waiting for it. That first boot creates objects as `POSTGRES_USER`.
+
+Empty `database.ownership` scheduling fields inherit `database.nodeSelector`, `affinity`, `tolerations`, `imagePullSecrets`, `podAnnotations`, `podSecurityContext`, and `securityContext`. Set the same keys under `database.ownership` to override them for the hook only.
+
+If the Job fails, Helm stops the upgrade and leaves `job/teslamate-db-ownership` in the release namespace (`kubectl logs job/teslamate-db-ownership`). The TeslaMate Deployment is not rolled. A successful Job is deleted.
+
+### Option B — run the SQL yourself
+
+Use this when the chart should not have superuser credentials. Connect to the **TeslaMate** database (not the maintenance database `postgres`) as a superuser or as the current owner. Replace `teslamate` if the app role has another name.
+
+From a machine with `psql` and a copy of this chart (repo or unpacked `.tgz`):
+
+```bash
+psql -U postgres -d teslamate -v ON_ERROR_STOP=1 -v app_user=teslamate \
+  -f files/reassign-ownership.psql
+```
+
+CloudNativePG, streaming the file into the primary:
+
+```bash
+kubectl exec -i -n <postgres-namespace> <cluster>-1 -- \
+  psql -U postgres -d teslamate -v ON_ERROR_STOP=1 -v app_user=teslamate \
+  < files/reassign-ownership.psql
+```
+
+The same script:
+
+<!-- BEGIN reassign-ownership.psql -->
+```sql
+-- Reassign TeslaMate objects to the role given by the psql variable app_user.
+--
+--   psql -d teslamate -v ON_ERROR_STOP=1 -v app_user=teslamate -f reassign-ownership.psql
+--
+-- Connect to the TeslaMate database as a superuser, or as the role that
+-- currently owns the objects. Idempotent: objects already owned by app_user
+-- are left alone, and running the script again changes nothing.
+--
+-- Schemas public (TeslaMate data) and private (the tokens table) only.
+-- Reassigns tables (including partitioned and foreign tables), views,
+-- materialized views, sequences that are not owned by a column, enum types,
+-- and functions. Indexes, toast tables, and column-owned sequences follow
+-- their table. Extension members — cube, earthdistance, and functions such
+-- as ll_to_earth — are not modified.
+--
+-- The owner changes run in one transaction. If any of them fails, none are kept.
+-- psql substitutes :'app_user' only outside dollar quotes, so the role name is
+-- staged in a session-local temp table before the DO block.
+
+SET lock_timeout = '15s';
+
+CREATE TEMP TABLE IF NOT EXISTS teslamate_ownership_target (app_user text);
+TRUNCATE teslamate_ownership_target;
+INSERT INTO teslamate_ownership_target (app_user) VALUES (:'app_user');
+
+DO $do$
+DECLARE
+  app_owner text;
+  app_oid oid;
+  rec record;
+  changed integer := 0;
+BEGIN
+  SELECT app_user INTO app_owner FROM teslamate_ownership_target;
+  IF app_owner IS NULL OR app_owner = '' THEN
+    RAISE EXCEPTION 'pass -v app_user=<TeslaMate DATABASE_USER>';
+  END IF;
+
+  SELECT oid INTO app_oid FROM pg_roles WHERE rolname = app_owner;
+  IF app_oid IS NULL THEN
+    RAISE EXCEPTION 'role "%" does not exist', app_owner;
+  END IF;
+
+  FOR rec IN
+    SELECT n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND c.relpersistence <> 't'
+      AND c.relowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, c.relname
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', rec.nspname, rec.relname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned table/view %.% to %', rec.nspname, rec.relname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND c.relkind = 'S'
+      AND c.relpersistence <> 't'
+      AND c.relowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.deptype = 'e'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.refclassid = 'pg_class'::regclass
+          AND d.refobjsubid > 0
+          AND d.deptype = 'a'
+      )
+    ORDER BY n.nspname, c.relname
+  LOOP
+    EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO %I', rec.nspname, rec.relname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned sequence %.% to %', rec.nspname, rec.relname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT n.nspname, t.typname
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND t.typtype = 'e'
+      AND t.typowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_type'::regclass
+          AND d.objid = t.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, t.typname
+  LOOP
+    EXECUTE format('ALTER TYPE %I.%I OWNER TO %I', rec.nspname, rec.typname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned enum %.% to %', rec.nspname, rec.typname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND p.prokind IN ('f', 'w')
+      AND p.proowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_proc'::regclass
+          AND d.objid = p.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, p.proname, p.oid
+  LOOP
+    -- regprocedure text is already a valid, quoted signature. Concatenate it
+    -- so a "%" in a type name cannot be read as a format() placeholder.
+    EXECUTE 'ALTER FUNCTION ' || rec.sig::text || ' OWNER TO ' || quote_ident(app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned function % to %', rec.sig, app_owner;
+  END LOOP;
+
+  RAISE NOTICE 'reassigned % object(s) to %', changed, app_owner;
+END
+$do$;
+```
+<!-- END reassign-ownership.psql -->
+
+Upgrade or restart TeslaMate after the script succeeds so 4.4.0 can apply the two migrations as the app role.
 
 ## Migration from Docker or existing K8s manifests
 

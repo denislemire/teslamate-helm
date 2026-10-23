@@ -31,6 +31,11 @@ mosquitto:
 #     mode: verify-full
 #     ca:
 #       existingSecret: teslamate-pg-ca   # CloudNativePG: <cluster>-ca
+#   # Only if a superuser restore left tables owned by postgres. See README.
+#   # preflight defaults to true and is skipped while enabled is true.
+#   ownership:
+#     enabled: true
+#     existingSecret: teslamate-pg-superuser  # CloudNativePG <cluster>-superuser
 # mosquitto:
 #   enabled: false
 #   host: mosquitto.home-assistant.svc.cluster.local

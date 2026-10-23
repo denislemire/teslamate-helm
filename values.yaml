@@ -47,6 +47,38 @@ database:
   existingSecretUserKey: "TM_DB_USER"
   existingSecretPasswordKey: "TM_DB_PASS"
   existingSecretDatabaseKey: "TM_DB_NAME"
+  # Ownership of objects restored or imported as a superuser.
+  # TeslaMate 4.4.0 alters existing tables and enums, which requires the app
+  # role to own them. See README "Upgrading to TeslaMate 4.4.0".
+  ownership:
+    # Fail the upgrade when public/private objects are not owned by the app
+    # role, before the TeslaMate Deployment rolls. On by default. Skipped when
+    # enabled is true (the repair hook runs instead) and on the first install
+    # of the bundled Postgres. Set false to skip the check.
+    preflight: true
+    # Opt-in repair. Off by default. Enable only when Postgres is already
+    # accepting connections.
+    enabled: false
+    # Superuser, or a current owner that is also a member of the app role.
+    # CloudNativePG: Secret <cluster>-superuser (keys username and password).
+    existingSecret: ""
+    existingSecretUserKey: "username"
+    existingSecretPasswordKey: "password"
+    # Empty values inherit the matching database.* scheduling fields.
+    podAnnotations: {}
+    podSecurityContext: {}
+    securityContext: {}
+    nodeSelector: {}
+    affinity: {}
+    tolerations: []
+    imagePullSecrets: []
+    resources:
+      requests:
+        cpu: 20m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
   extraEnv: []
   extraEnvFrom: []
   podAnnotations: {}
