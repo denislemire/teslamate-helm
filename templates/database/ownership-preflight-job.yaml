@@ -1,0 +1,154 @@
+{{/*
+Preflight for TeslaMate 4.4.0 ownership.
+
+Runs only when database.ownership.preflight is true and the repair hook is
+off. The repair Job changes owners itself, so a failing check in front of it
+would block the fix.
+
+This is a Helm hook rather than an initContainer. An initContainer starts
+only after Helm has already updated the Deployment, which is the crash-loop
+this check exists to avoid. A failed hook aborts the upgrade and leaves the
+Deployment unrolled.
+
+The bundled Postgres does not exist yet during pre-install, so the hook is
+pre-upgrade only while database.enabled is true. An external database is
+expected to be up, so the hook also runs pre-install.
+
+The check connects as the app role. It does not need a superuser secret.
+Missing teslamate.existingSecret is not a template error: default installs
+render the same empty secret name as the TeslaMate Deployment, and the Job
+fails at runtime if that secret was never created.
+*/}}
+{{- if and .Values.database.ownership.preflight (not .Values.database.ownership.enabled) }}
+{{- $sql := .Files.Get "files/ownership-preflight.psql" }}
+{{- if not (contains "deptype = 'e'" $sql) }}
+{{- fail "files/ownership-preflight.psql is missing from the chart package" }}
+{{- end }}
+{{- include "teslamate.validateDatabaseSsl" . }}
+{{- $appSecret := .Values.teslamate.existingSecret | toString | trim }}
+{{- $appUserKey := .Values.teslamate.existingSecretUserKey | toString | trim }}
+{{- $appPassKey := .Values.teslamate.existingSecretPasswordKey | toString | trim }}
+{{- $appDbKey := .Values.teslamate.existingSecretDatabaseKey | toString | trim }}
+{{- $hooks := "pre-upgrade" }}
+{{- if not .Values.database.enabled }}
+{{- $hooks = "pre-install,pre-upgrade" }}
+{{- end }}
+{{- $own := .Values.database.ownership }}
+{{- $db := .Values.database }}
+{{- $sched := dict
+  "nodeSelector" (default $db.nodeSelector $own.nodeSelector)
+  "affinity" (default $db.affinity $own.affinity)
+  "tolerations" (default $db.tolerations $own.tolerations)
+  "podAnnotations" (default $db.podAnnotations $own.podAnnotations)
+  "podSecurityContext" (default $db.podSecurityContext $own.podSecurityContext)
+  "securityContext" (default $db.securityContext $own.securityContext)
+}}
+{{- $pull := $own.imagePullSecrets }}
+{{- if not $pull }}
+{{- $pull = $db.imagePullSecrets }}
+{{- end }}
+{{- if $pull }}
+{{- $_ := set $sched "imagePullSecrets" $pull }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: teslamate-db-ownership-preflight
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/component: database-ownership-preflight
+    {{- include "teslamate.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": {{ $hooks | quote }}
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: database-ownership-preflight
+        {{- include "teslamate.selectorLabels" . | nindent 8 }}
+      {{- include "teslamate.podAnnotations" $sched | nindent 6 }}
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      {{- include "teslamate.podPlacement" (dict "component" $sched "root" .) | nindent 6 }}
+      {{- include "teslamate.podSecurityContext" $sched | nindent 6 }}
+      containers:
+        - name: ownership-preflight
+          image: "{{ .Values.database.image.registry }}{{ .Values.database.image.repository }}:{{ .Values.database.image.tag }}"
+          imagePullPolicy: {{ .Values.database.image.pullPolicy }}
+          {{- include "teslamate.containerSecurityContext" $sched | nindent 10 }}
+          command: ["sh", "-eu", "-c"]
+          args:
+            - |
+              ready=0
+              i=0
+              while [ "$i" -lt 30 ]; do
+                if pg_isready -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE" -U "$PGUSER" >/dev/null 2>&1; then
+                  ready=1
+                  break
+                fi
+                echo "waiting for postgres at ${PGHOST}:${PGPORT} database ${PGDATABASE}..."
+                i=$((i + 1))
+                sleep 2
+              done
+              if [ "$ready" != 1 ]; then
+                echo "postgres did not become ready; ownership was not checked" >&2
+                exit 1
+              fi
+              # -q keeps a passing check silent. Errors still go to stderr.
+              printf '%s\n' "$PREFLIGHT_SQL" > /tmp/ownership-preflight.psql
+              psql --no-password -q -v ON_ERROR_STOP=1 -v VERBOSITY=terse -f /tmp/ownership-preflight.psql
+          env:
+            - name: PGHOST
+              value: {{ include "teslamate.databaseHost" . | quote }}
+            - name: PGPORT
+              value: {{ include "teslamate.databasePort" . | quote }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $appSecret | quote }}
+                  key: {{ $appUserKey | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $appSecret | quote }}
+                  key: {{ $appPassKey | quote }}
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $appSecret | quote }}
+                  key: {{ $appDbKey | quote }}
+            - name: PGCONNECT_TIMEOUT
+              value: "5"
+            - name: PGAPPNAME
+              value: teslamate-db-ownership-preflight
+            - name: PGSSLMODE
+              value: {{ include "teslamate.databaseSslMode" . | quote }}
+            {{- if eq (include "teslamate.databaseSslMode" . | trim) "verify-full" }}
+            - name: PGSSLROOTCERT
+              value: {{ include "teslamate.postgresCaFile" . | quote }}
+            {{- end }}
+            - name: PREFLIGHT_SQL
+              value: |
+{{ $sql | indent 16 }}
+          {{- $caMount := include "teslamate.postgresCaVolumeMount" . | trim }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $caMount }}
+            {{- $caMount | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.database.ownership.resources | nindent 12 }}
+      {{- $caVolume := include "teslamate.postgresCaVolume" . | trim }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $caVolume }}
+        {{- $caVolume | nindent 8 }}
+        {{- end }}
+{{- end }}

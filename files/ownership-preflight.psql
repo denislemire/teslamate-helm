@@ -1,0 +1,180 @@
+-- Fail when the connected role does not own TeslaMate objects it must alter.
+--
+-- The chart runs this as the app role (TM_DB_USER) before rolling TeslaMate.
+-- A clean database prints nothing and exits 0. Any non-extension object in
+-- schemas public or private that this role does not own raises an exception,
+-- and psql exits non-zero.
+--
+-- The object filter matches files/reassign-ownership.psql. Tables (including
+-- partitioned and foreign tables), views, materialized views, sequences that
+-- are not owned by a column, enum types, and functions. Indexes, toast tables,
+-- and column-owned sequences follow their table. Extension members — cube,
+-- earthdistance, and functions such as ll_to_earth — are ignored.
+--
+-- No temp tables: a role that owns the database can read pg_catalog, and this
+-- check must not require TEMP.
+
+DO $do$
+DECLARE
+  app_owner text := current_user;
+  app_db text := current_database();
+  app_oid oid;
+  labels text[];
+  n integer;
+  extra integer;
+  shown text;
+  shell_user text;
+  shell_db text;
+  msg text;
+BEGIN
+  SELECT oid INTO app_oid FROM pg_roles WHERE rolname = app_owner;
+  IF app_oid IS NULL THEN
+    RAISE EXCEPTION 'role "%" does not exist', app_owner;
+  END IF;
+
+  labels := ARRAY(
+    SELECT
+      CASE
+        WHEN q.nspname ~ '^[A-Za-z_][A-Za-z0-9_]*$' THEN q.nspname
+        ELSE quote_ident(q.nspname)
+      END
+      || '.' ||
+      CASE
+        WHEN q.objname ~ '^[A-Za-z_][A-Za-z0-9_]*$' THEN q.objname
+        ELSE quote_ident(q.objname)
+      END
+      || q.suffix
+    FROM (
+      SELECT n.nspname, c.relname AS objname,
+        ' (' || CASE c.relkind
+          WHEN 'r' THEN 'table'
+          WHEN 'p' THEN 'partitioned table'
+          WHEN 'v' THEN 'view'
+          WHEN 'm' THEN 'materialized view'
+          WHEN 'f' THEN 'foreign table'
+        END || ')' AS suffix
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'private')
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+        AND c.relpersistence <> 't'
+        AND c.relowner IS DISTINCT FROM app_oid
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_class'::regclass
+            AND d.objid = c.oid
+            AND d.deptype = 'e'
+        )
+
+      UNION ALL
+
+      SELECT n.nspname, c.relname,
+        ' (sequence)'
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname IN ('public', 'private')
+        AND c.relkind = 'S'
+        AND c.relpersistence <> 't'
+        AND c.relowner IS DISTINCT FROM app_oid
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_class'::regclass
+            AND d.objid = c.oid
+            AND d.deptype = 'e'
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_class'::regclass
+            AND d.objid = c.oid
+            AND d.refclassid = 'pg_class'::regclass
+            AND d.refobjsubid > 0
+            AND d.deptype = 'a'
+        )
+
+      UNION ALL
+
+      SELECT n.nspname, t.typname,
+        ' (enum)'
+      FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+      WHERE n.nspname IN ('public', 'private')
+        AND t.typtype = 'e'
+        AND t.typowner IS DISTINCT FROM app_oid
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_type'::regclass
+            AND d.objid = t.oid
+            AND d.deptype = 'e'
+        )
+
+      UNION ALL
+
+      SELECT n.nspname, p.proname,
+        '(' || COALESCE((
+          SELECT string_agg(format_type(u.typ, NULL), ', ' ORDER BY u.ord)
+          FROM unnest(p.proargtypes) WITH ORDINALITY AS u(typ, ord)
+        ), '') || ') (function)'
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname IN ('public', 'private')
+        AND p.prokind IN ('f', 'w')
+        AND p.proowner IS DISTINCT FROM app_oid
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend d
+          WHERE d.classid = 'pg_proc'::regclass
+            AND d.objid = p.oid
+            AND d.deptype = 'e'
+        )
+    ) q
+    ORDER BY 1
+  );
+
+  n := cardinality(labels);
+  IF n = 0 THEN
+    RETURN;
+  END IF;
+
+  shown := array_to_string(labels[1:5], ', ');
+  extra := n - 5;
+  IF extra > 0 THEN
+    shown := shown || format(', and %s more', extra);
+  END IF;
+
+  -- Simple identifiers stay bare so the command can be copied. Anything else
+  -- is wrapped in shell single quotes.
+  shell_user := app_owner;
+  IF shell_user !~ '^[A-Za-z_][A-Za-z0-9_]*$' THEN
+    shell_user := '''' || replace(app_owner, '''', $q$'\''$q$) || '''';
+  END IF;
+  shell_db := app_db;
+  IF shell_db !~ '^[A-Za-z_][A-Za-z0-9_]*$' THEN
+    shell_db := '''' || replace(app_db, '''', $q$'\''$q$) || '''';
+  END IF;
+
+  msg := format($msg$TeslaMate cannot migrate this database: role %s does not own %s object%s in schemas public and private.
+Examples: %s.
+TeslaMate 4.4.0 alters existing tables and enums and will crash-loop until ownership is fixed.
+Fix either way, then upgrade again:
+  1. Enable the chart hook with a superuser secret:
+       database.ownership.enabled: true
+       database.ownership.existingSecret: <superuser secret>  # CloudNativePG: <cluster>-superuser
+  2. Or run this as a superuser against database %s:
+       psql -U postgres -d %s -v ON_ERROR_STOP=1 -v app_user=%s -f files/reassign-ownership.psql
+Set database.ownership.preflight: false to skip this check.$msg$,
+    '"' || replace(app_owner, '"', '""') || '"',
+    n,
+    CASE WHEN n = 1 THEN '' ELSE 's' END,
+    shown,
+    '"' || replace(app_db, '"', '""') || '"',
+    shell_db,
+    shell_user
+  );
+
+  RAISE EXCEPTION '%', msg;
+END
+$do$;
