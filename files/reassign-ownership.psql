@@ -1,0 +1,142 @@
+-- Reassign TeslaMate objects to the role given by the psql variable app_user.
+--
+--   psql -d teslamate -v ON_ERROR_STOP=1 -v app_user=teslamate -f reassign-ownership.psql
+--
+-- Connect to the TeslaMate database as a superuser, or as the role that
+-- currently owns the objects. Idempotent: objects already owned by app_user
+-- are left alone, and running the script again changes nothing.
+--
+-- Schemas public (TeslaMate data) and private (the tokens table) only.
+-- Reassigns tables (including partitioned and foreign tables), views,
+-- materialized views, sequences that are not owned by a column, enum types,
+-- and functions. Indexes, toast tables, and column-owned sequences follow
+-- their table. Extension members — cube, earthdistance, and functions such
+-- as ll_to_earth — are not modified.
+--
+-- The owner changes run in one transaction. If any of them fails, none are kept.
+-- psql substitutes :'app_user' only outside dollar quotes, so the role name is
+-- staged in a session-local temp table before the DO block.
+
+SET lock_timeout = '15s';
+
+CREATE TEMP TABLE IF NOT EXISTS teslamate_ownership_target (app_user text);
+TRUNCATE teslamate_ownership_target;
+INSERT INTO teslamate_ownership_target (app_user) VALUES (:'app_user');
+
+DO $do$
+DECLARE
+  app_owner text;
+  app_oid oid;
+  rec record;
+  changed integer := 0;
+BEGIN
+  SELECT app_user INTO app_owner FROM teslamate_ownership_target;
+  IF app_owner IS NULL OR app_owner = '' THEN
+    RAISE EXCEPTION 'pass -v app_user=<TeslaMate DATABASE_USER>';
+  END IF;
+
+  SELECT oid INTO app_oid FROM pg_roles WHERE rolname = app_owner;
+  IF app_oid IS NULL THEN
+    RAISE EXCEPTION 'role "%" does not exist', app_owner;
+  END IF;
+
+  FOR rec IN
+    SELECT n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+      AND c.relpersistence <> 't'
+      AND c.relowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, c.relname
+  LOOP
+    EXECUTE format('ALTER TABLE %I.%I OWNER TO %I', rec.nspname, rec.relname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned table/view %.% to %', rec.nspname, rec.relname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT n.nspname, c.relname
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND c.relkind = 'S'
+      AND c.relpersistence <> 't'
+      AND c.relowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.deptype = 'e'
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_class'::regclass
+          AND d.objid = c.oid
+          AND d.refclassid = 'pg_class'::regclass
+          AND d.refobjsubid > 0
+          AND d.deptype = 'a'
+      )
+    ORDER BY n.nspname, c.relname
+  LOOP
+    EXECUTE format('ALTER SEQUENCE %I.%I OWNER TO %I', rec.nspname, rec.relname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned sequence %.% to %', rec.nspname, rec.relname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT n.nspname, t.typname
+    FROM pg_type t
+    JOIN pg_namespace n ON n.oid = t.typnamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND t.typtype = 'e'
+      AND t.typowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_type'::regclass
+          AND d.objid = t.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, t.typname
+  LOOP
+    EXECUTE format('ALTER TYPE %I.%I OWNER TO %I', rec.nspname, rec.typname, app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned enum %.% to %', rec.nspname, rec.typname, app_owner;
+  END LOOP;
+
+  FOR rec IN
+    SELECT p.oid::regprocedure AS sig
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname IN ('public', 'private')
+      AND p.prokind IN ('f', 'w')
+      AND p.proowner IS DISTINCT FROM app_oid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_depend d
+        WHERE d.classid = 'pg_proc'::regclass
+          AND d.objid = p.oid
+          AND d.deptype = 'e'
+      )
+    ORDER BY n.nspname, p.proname, p.oid
+  LOOP
+    -- regprocedure text is already a valid, quoted signature. Concatenate it
+    -- so a "%" in a type name cannot be read as a format() placeholder.
+    EXECUTE 'ALTER FUNCTION ' || rec.sig::text || ' OWNER TO ' || quote_ident(app_owner);
+    changed := changed + 1;
+    RAISE NOTICE 'reassigned function % to %', rec.sig, app_owner;
+  END LOOP;
+
+  RAISE NOTICE 'reassigned % object(s) to %', changed, app_owner;
+END
+$do$;
